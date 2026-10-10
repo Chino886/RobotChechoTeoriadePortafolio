@@ -111,7 +111,47 @@ def fetch_asset_data(ticker: str, start_date, end_date) -> AssetData:
         timezone=timezone,
         dropped_rows=dropped,
     )
+def fetch_fx_to_usd(currency: str, start_date, end_date) -> AssetData:
+    """
+    Descarga el tipo de cambio de `currency` a USD, para poder convertir
+    activos en otras monedas y compararlos en una sola base (ampliación de
+    RF-20). Yahoo Finance nombra los pares de divisas de dos formas distintas
+    según la moneda (ej. 'EURUSD=X' para euros, pero 'USDCOP=X' para pesos
+    colombianos), así que se intenta primero el patrón directo y, si no hay
+    datos, el patrón inverso (invirtiendo la serie: 1 / tasa). Nunca inventa
+    ni aproxima una tasa: si ninguno de los dos tickers tiene datos, reporta
+    el fallo para que el llamador excluya ese activo.
+    """
+    currency = (currency or "").strip().upper()
+    if not currency or currency == "USD":
+        return AssetData(ticker="USD", ok=False, error="USD no necesita conversión.")
 
+    direct = fetch_asset_data(f"{currency}USD=X", start_date, end_date)
+    if direct.ok:
+        return direct
+
+    inverse = fetch_asset_data(f"USD{currency}=X", start_date, end_date)
+    if inverse.ok and inverse.prices is not None:
+        inverted_prices = inverse.prices.copy()
+        inverted_prices["adjusted_close"] = 1.0 / inverted_prices["adjusted_close"]
+        return AssetData(
+            ticker=f"{currency}USD=X",
+            ok=True,
+            prices=inverted_prices,
+            source=inverse.source,
+            currency="USD",
+            timezone=inverse.timezone,
+            dropped_rows=inverse.dropped_rows,
+        )
+
+    return AssetData(
+        ticker=f"{currency}USD=X",
+        ok=False,
+        error=(
+            f"No se encontró tipo de cambio para '{currency}' en Yahoo Finance "
+            f"(se intentó '{currency}USD=X' y 'USD{currency}=X')."
+        ),
+    )
 
 def resample_prices(prices: pd.DataFrame, frequency: str) -> pd.DataFrame:
     """Remuestrea ANTES de calcular rendimientos (RF-07)."""
