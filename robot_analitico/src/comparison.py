@@ -8,9 +8,11 @@ dependen de H (el horizonte de pronóstico de las fases anteriores).
 
 Comparabilidad (RF-20): todos los puntos usan la intersección común de
 fechas después del remuestreo, la misma frecuencia, precio, log-rendimiento,
-factores de anualización y moneda base. Sin conversión de monedas, los
-activos con moneda distinta a la base quedan bloqueados de la comparación
-(no se eliminan del lote, se reportan aparte).
+factores de anualización y moneda base (USD por defecto). Los activos en
+otra moneda se convierten a la moneda base usando el tipo de cambio
+histórico correspondiente (ver src.data.fetch_fx_to_usd); si no se consigue
+ese tipo de cambio, el activo queda excluido de la comparación (nunca se
+inventa ni se aproxima una tasa), y se reporta aparte.
 
 Todas las fórmulas fueron verificadas contra el fixture obligatorio de 20
 activos de la guía (Fixture_20_activos_sintetico_TBS_EIA.csv /
@@ -86,12 +88,20 @@ def build_comparison(
     frequency: str,
     periods_per_year: int,
     base_currency: Optional[str] = None,
+    fx_rates: "Optional[dict[str, pd.Series]]" = None,
 ) -> ComparisonResult:
     """
     Construye la comparación de N activos (RF-19, RF-20). `assets` debe venir
     de src.data.fetch_many (o equivalente), ya remuestreado a la frecuencia
     elegida. Los activos con ok=False (RF-08) se excluyen automáticamente con
     su motivo; no detienen el análisis de los demás.
+
+    `fx_rates` (ampliación de RF-20): dict moneda -> serie de tipo de cambio
+    (unidades de `base_currency` por 1 unidad de esa moneda), ya descargada
+    y remuestreada por el llamador con src.data.fetch_fx_to_usd. Los activos
+    en otra moneda se convierten multiplicando su precio por el tipo de
+    cambio alineado por fecha; si no hay tasa disponible para esa moneda, el
+    activo se excluye (nunca se inventa una tasa).
     """
     ok_assets = {t: a for t, a in assets.items() if getattr(a, "ok", False) and a.prices is not None and not a.prices.empty}
     excluded: "list[ExcludedAsset]" = []
@@ -103,40 +113,60 @@ def build_comparison(
     if not ok_assets:
         return ComparisonResult(ok=False, reason="Ningún activo válido para comparar.", excluded=excluded)
 
-    # Moneda base (RF-20): si no se especifica, se usa la moneda más frecuente
-    # entre los activos válidos. Los que no coincidan quedan bloqueados, sin
-    # conversión (fuera de alcance de este piloto académico).
+    # Moneda base (RF-20 ampliado): USD por defecto, salvo que se indique otra.
     if base_currency is None:
-        currency_counts: "dict[str, int]" = {}
-        for asset in ok_assets.values():
-            currency = asset.currency or "N/D"
-            currency_counts[currency] = currency_counts.get(currency, 0) + 1
-        base_currency = max(currency_counts.items(), key=lambda kv: kv[1])[0]
+        base_currency = "USD"
 
-    compatible = {}
+    fx_rates = fx_rates or {}
+
+    # Convierte cada activo a la moneda base. Si ya está en esa moneda, se usa
+    # el precio tal cual; si no, se necesita el tipo de cambio en fx_rates
+    # alineado por fecha (forward-fill para días sin cotización de la divisa,
+    # igual que un feriado); si no hay tasa suficiente, el activo se excluye.
+    compatible: "dict[str, pd.DataFrame]" = {}
     for ticker, asset in ok_assets.items():
-        currency = asset.currency or "N/D"
-        if currency != base_currency:
+        currency = (asset.currency or "N/D").upper()
+        if currency == base_currency:
+            compatible[ticker] = asset.prices
+            continue
+
+        fx_series = fx_rates.get(currency)
+        if fx_series is None or fx_series.empty:
             excluded.append(
                 ExcludedAsset(
                     ticker=ticker,
                     reason=(
-                        f"Moneda '{currency}' incompatible con la moneda base '{base_currency}' "
-                        "(sin conversión de monedas en este piloto académico)."
+                        f"No se encontró tipo de cambio de '{currency}' a '{base_currency}' "
+                        "para convertir este activo (RF-20 ampliado: conversión de monedas)."
                     ),
                 )
             )
-        else:
-            compatible[ticker] = asset
+            continue
+
+        aligned_fx = fx_series.reindex(asset.prices.index).ffill()
+        valid = aligned_fx.notna()
+        if int(valid.sum()) < 2:
+            excluded.append(
+                ExcludedAsset(
+                    ticker=ticker,
+                    reason=(
+                        f"Tipo de cambio '{currency}->{base_currency}' insuficiente para "
+                        "convertir este activo."
+                    ),
+                )
+            )
+            continue
+
+        converted_close = asset.prices.loc[valid, "adjusted_close"] * aligned_fx[valid]
+        compatible[ticker] = pd.DataFrame({"adjusted_close": converted_close})
 
     if not compatible:
         return ComparisonResult(
             ok=False,
-            reason=f"Ningún activo válido en la moneda base '{base_currency}'.",
+            reason=f"Ningún activo pudo expresarse en la moneda base '{base_currency}'.",
             excluded=excluded,
             base_currency=base_currency,
         )
-
     # Intersección común de fechas DESPUÉS del remuestreo (RF-20). Las
     # coordenadas históricas resultantes no dependen de H.
     common_index = None
@@ -156,8 +186,8 @@ def build_comparison(
     summaries: "list[AssetSummary]" = []
     common_prices: "dict[str, pd.Series]" = {}
 
-    for ticker, asset in compatible.items():
-        trimmed = asset.prices.loc[common_index, "adjusted_close"]
+    for ticker, trimmed_prices in compatible.items():
+        trimmed = trimmed_prices.loc[common_index, "adjusted_close"]
         returns = log_returns(trimmed)
         if len(returns) < 2:
             excluded.append(
@@ -171,11 +201,12 @@ def build_comparison(
         vol_annual = annualize_vol(std_period, periods_per_year)
         rvr = (mean_annual / vol_annual) if vol_annual > 0 else None
 
+        original_asset = ok_assets[ticker]
         summaries.append(
             AssetSummary(
                 ticker=ticker,
-                currency=asset.currency or "N/D",
-                source=asset.source,
+                currency=original_asset.currency or "N/D",
+                source=original_asset.source,
                 n=len(returns),
                 start_date=trimmed.index.min(),
                 end_date=trimmed.index.max(),
@@ -302,7 +333,7 @@ def comparison_table(result: ComparisonResult, non_dominated: "set[str]") -> pd.
         rows.append(
             {
                 "ticker": s.ticker,
-                "moneda": s.currency,
+                "moneda_original": s.currency,
                 "fuente": s.source,
                 "n_rendimientos": s.n,
                 "fecha_inicio_comun": s.start_date.date(),
