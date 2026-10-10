@@ -33,7 +33,8 @@ from src.comparison import (
     preselect_non_dominated,
     processed_prices_export,
 )
-from src.data import FREQUENCY_RULES, fetch_asset_data, fetch_many, resample_prices
+from src.data import FREQUENCY_RULES, fetch_asset_data, fetch_fx_to_usd, fetch_many, resample_prices
+from src.rates import fetch_bond_series, search_bond_series
 from src.forecasting import (
     FORECAST_MODELS,
     WALKFORWARD_ORIGINS,
@@ -636,8 +637,32 @@ def render_comparison() -> None:
         else:
             with st.spinner(f"Descargando y comparando {len(tickers)} activos..."):
                 assets = fetch_many(tickers, start_date, end_date, frequency)
+
+                # Conversión de monedas (RF-20 ampliado): se descarga el tipo
+                # de cambio de cada moneda distinta a USD presente entre los
+                # activos válidos, para poder compararlos a todos en USD.
+                currencies_needed = {
+                    (a.currency or "").upper()
+                    for a in assets.values()
+                    if getattr(a, "ok", False) and a.currency and a.currency.upper() != "USD"
+                }
+                fx_rates = {}
+                fx_errors = []
+                for currency in currencies_needed:
+                    fx_result = fetch_fx_to_usd(currency, start_date, end_date)
+                    if fx_result.ok and fx_result.prices is not None:
+                        fx_result.prices = resample_prices(fx_result.prices, frequency)
+                        fx_rates[currency] = fx_result.prices["adjusted_close"]
+                    else:
+                        fx_errors.append(f"{currency}->USD: {fx_result.error or 'sin datos'}")
+
                 periods_per_year = FREQUENCY_PERIODS_PER_YEAR.get(frequency, 252)
-                result = build_comparison(assets, frequency, periods_per_year)
+                result = build_comparison(assets, frequency, periods_per_year, fx_rates=fx_rates)
+            if fx_errors:
+                st.warning(
+                    "No se pudo obtener el tipo de cambio para: " + "; ".join(fx_errors) +
+                    ". Los activos en esas monedas quedarán excluidos de la comparación."
+                )
             st.session_state["comparison_result"] = result
 
     result = st.session_state.get("comparison_result")
@@ -758,7 +783,80 @@ def render_comparison() -> None:
                 file_name="parametros_comparacion.json",
                 mime="application/json",
             )
+def render_sovereign_rates() -> None:
+    """
+    Tasas de bonos soberanos a 10 años por país, vía la API de FRED.
+    Vista de referencia macroeconómica, independiente de la comparación de
+    activos de arriba: no entra en el mapa de dominancia ni en la
+    preselección (RF-19 a RF-22), es solo información de contexto.
+    """
+    st.divider()
+    st.subheader("Tasas de bonos soberanos por país (referencia, vía FRED)")
+    st.caption(
+        "Fuente: FRED (Federal Reserve Economic Data, Banco de la Reserva "
+        "Federal de St. Louis). Se busca en vivo la serie real que corresponde "
+        "al país indicado — nunca se asume un código de serie de antemano."
+    )
 
+    fred_api_key = st.secrets.get("FRED_API_KEY")
+    if not fred_api_key:
+        st.info(
+            "Esta vista necesita una API key gratuita de FRED configurada en "
+            "los secretos de la app (FRED_API_KEY) para funcionar."
+        )
+        return
+
+    country_query = st.text_input(
+        "País (en inglés suele funcionar mejor, ej. 'Colombia', 'United States', 'Brazil')",
+        value="Colombia",
+        key="rates_country_query",
+    )
+
+    if st.button("Buscar tasa", key="rates_search_button"):
+        with st.spinner(f"Buscando series de FRED para '{country_query}'..."):
+            try:
+                results = search_bond_series(fred_api_key, country_query)
+            except Exception as exc:
+                st.error(f"Error al consultar FRED: {exc}")
+                results = []
+        st.session_state["rates_search_results"] = results
+
+    results = st.session_state.get("rates_search_results", [])
+    if not results:
+        return
+
+    options = {f"{r['id']} — {r['title']}": r["id"] for r in results}
+    selected_label = st.selectbox(
+        "Elige la serie exacta (verifica que el título sea el país correcto)",
+        list(options.keys()),
+        key="rates_selected_series",
+    )
+    series_id = options[selected_label]
+
+    col1, col2 = st.columns(2)
+    with col1:
+        rates_start = st.date_input("Fecha inicial", value=pd.Timestamp("2015-01-01"), key="rates_start")
+    with col2:
+        rates_end = st.date_input("Fecha final", value=pd.Timestamp.today(), key="rates_end")
+
+    if st.button("Traer serie histórica", key="rates_fetch_button"):
+        with st.spinner("Descargando de FRED..."):
+            try:
+                series = fetch_bond_series(fred_api_key, series_id, rates_start, rates_end)
+            except Exception as exc:
+                st.error(f"Error al descargar la serie: {exc}")
+                series = pd.Series(dtype=float)
+        if series.empty:
+            st.warning("No se encontraron observaciones válidas para ese rango de fechas.")
+        else:
+            st.line_chart(series, height=250)
+            st.metric(
+                "Última tasa disponible",
+                f"{series.iloc[-1]:.2f}%",
+                help=f"Fecha: {series.index[-1].date()}",
+            )
+            with st.expander("Ver datos en tabla"):
+                st.dataframe(series.rename("tasa_%"))
 
 def main() -> None:
     render_header()
@@ -826,9 +924,9 @@ def main() -> None:
     render_historical_analysis()
     render_forecast()
     render_comparison()
+    render_sovereign_rates()
 
     if not DEV_MODE and st.button("Cerrar sesión"):
-        st.logout()
 
 
 if __name__ == "__main__":
