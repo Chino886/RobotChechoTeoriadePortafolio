@@ -114,6 +114,10 @@ def drawdown_series(prices: pd.Series) -> pd.Series:
 def max_drawdown(prices: pd.Series) -> float:
     return float(drawdown_series(prices).min())
 
+def max_drawdown_date(prices: pd.Series) -> pd.Timestamp:
+    """Fecha en la que ocurre la máxima caída histórica (RF-12)."""
+    return drawdown_series(prices).idxmin()
+
 
 # ---------------------------------------------------------------------------
 # Diagnósticos de supuestos (sección 5.4 de la guía): normalidad, dependencia,
