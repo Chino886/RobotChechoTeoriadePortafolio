@@ -927,7 +927,6 @@ def main() -> None:
     render_sovereign_rates()
 
     if not DEV_MODE and st.button("Cerrar sesión"):
-
-
+        st.logout()
 if __name__ == "__main__":
     main()
