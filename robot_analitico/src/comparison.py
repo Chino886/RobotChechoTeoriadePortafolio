@@ -170,8 +170,8 @@ def build_comparison(
     # Intersección común de fechas DESPUÉS del remuestreo (RF-20). Las
     # coordenadas históricas resultantes no dependen de H.
     common_index = None
-    for asset in compatible.values():
-        idx = asset.prices.index
+    for prices in compatible.values():
+        idx = prices.index
         common_index = idx if common_index is None else common_index.intersection(idx)
 
     if common_index is None or len(common_index) < 2:
