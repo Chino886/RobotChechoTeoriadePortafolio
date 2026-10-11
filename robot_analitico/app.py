@@ -650,6 +650,14 @@ def render_comparison() -> None:
                 fx_errors = []
                 for currency in currencies_needed:
                     fx_result = fetch_fx_to_usd(currency, start_date, end_date)
+                    st.write(
+                        f"DEBUG {currency}: ok={fx_result.ok}, ticker_usado={fx_result.ticker}, "
+                        f"error={fx_result.error}, "
+                        f"n_filas={0 if fx_result.prices is None else len(fx_result.prices)}"
+                    )
+                    if fx_result.prices is not None and not fx_result.prices.empty:
+                        st.write("Primeras fechas:", fx_result.prices.index.min(), "- Últimas:", fx_result.prices.index.max())
+                        st.dataframe(fx_result.prices.head(3))
                     if fx_result.ok and fx_result.prices is not None:
                         fx_result.prices = resample_prices(fx_result.prices, frequency)
                         fx_rates[currency] = fx_result.prices["adjusted_close"]
