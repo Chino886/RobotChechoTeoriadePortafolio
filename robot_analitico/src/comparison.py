@@ -123,7 +123,7 @@ def build_comparison(
     # el precio tal cual; si no, se necesita el tipo de cambio en fx_rates
     # alineado por fecha (forward-fill para días sin cotización de la divisa,
     # igual que un feriado); si no hay tasa suficiente, el activo se excluye.
-        compatible: "dict[str, pd.DataFrame]" = {}
+    compatible: "dict[str, pd.DataFrame]" = {}
     for ticker, asset in ok_assets.items():
         currency = (asset.currency or "N/D").upper()
 
