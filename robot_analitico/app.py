@@ -865,6 +865,132 @@ def render_sovereign_rates() -> None:
             )
             with st.expander("Ver datos en tabla"):
                 st.dataframe(series.rename("tasa_%"))
+def render_portfolio_forecast() -> None:
+    """
+    Pronóstico individual por activo para una canasta con montos invertidos en
+    USD (ampliación de RF-13 a RF-15): cada activo se pronostica por separado
+    con su propio historial — no es un portafolio combinado, no hay pesos
+    conjuntos, covarianzas ni frontera eficiente, solo una lista de
+    pronósticos independientes, uno por activo.
+    """
+    st.divider()
+    st.subheader("Pronóstico por canasta de inversión (monto en USD por activo)")
+    st.caption(
+        "Cada activo se pronostica por separado con su propio historial — no es "
+        "un portafolio combinado (no hay correlaciones conjuntas ni frontera "
+        "eficiente). Sirve para ver, activo por activo, cuánto podría valer lo "
+        "invertido en cada uno a cierto plazo."
+    )
+
+    default_text = "AAPL, 10\nGOOGL, 50\nGXTESCOL, 40"
+    basket_text = st.text_area(
+        "Un activo por línea: TICKER, monto en USD invertido",
+        value=default_text,
+        key="portfolio_forecast_text",
+        height=100,
+    )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        pf_start = st.date_input("Fecha inicial", value=pd.Timestamp("2023-01-01"), key="pf_start")
+    with col2:
+        pf_end = st.date_input("Fecha final", value=pd.Timestamp.today(), key="pf_end")
+    with col3:
+        pf_frequency = st.selectbox("Frecuencia", list(FREQUENCY_RULES.keys()), key="pf_frequency")
+
+    col_model, col_h = st.columns(2)
+    with col_model:
+        pf_model_label = st.selectbox("Modelo", list(FORECAST_MODELS.keys()), key="pf_model")
+    with col_h:
+        pf_horizon = st.number_input(
+            f"Plazo H (en periodos de frecuencia '{pf_frequency}')",
+            min_value=1, value=10, step=1, key="pf_horizon",
+        )
+
+    if st.button("Pronosticar canasta"):
+        entries = []
+        for line in basket_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) != 2:
+                st.warning(f"Línea ignorada (formato esperado 'TICKER, monto'): '{line}'")
+                continue
+            ticker_raw, amount_raw = parts
+            try:
+                amount = float(amount_raw)
+            except ValueError:
+                st.warning(f"Monto inválido en la línea '{line}', se ignora.")
+                continue
+            if amount <= 0:
+                st.warning(f"El monto debe ser positivo en la línea '{line}', se ignora.")
+                continue
+            entries.append((ticker_raw.upper(), amount))
+
+        if not entries:
+            st.error("No hay activos válidos para pronosticar.")
+            return
+
+        fit_fn = FORECAST_MODELS[pf_model_label]
+        horizon = int(pf_horizon)
+        periods_per_year = FREQUENCY_PERIODS_PER_YEAR[pf_frequency]
+
+        with st.spinner(f"Descargando y pronosticando {len(entries)} activo(s)..."):
+            for ticker, amount in entries:
+                asset = fetch_asset_data(ticker, pf_start, pf_end)
+                if not asset.ok or asset.prices is None:
+                    st.error(f"**{ticker}**: {asset.error or 'sin datos'}")
+                    continue
+                asset.prices = resample_prices(asset.prices, pf_frequency)
+                if asset.prices.empty:
+                    st.error(f"**{ticker}**: sin observaciones tras remuestrear.")
+                    continue
+
+                prices = asset.prices["adjusted_close"]
+                returns = log_returns(prices)
+                if len(returns) < 2:
+                    st.error(f"**{ticker}**: muestra insuficiente para calcular rendimientos.")
+                    continue
+
+                p0 = float(prices.iloc[-1])
+                last_date = prices.index[-1]
+                model = fit_fn(returns)
+                dist = terminal_distribution(model, p0, horizon)
+
+                value_median = amount * (dist.median_price / p0)
+                value_q05 = amount * (dist.q05_price / p0)
+                value_q95 = amount * (dist.q95_price / p0)
+
+                h_max = max_valid_horizon(len(returns), periods_per_year)
+                suficiencia_nota = (
+                    ""
+                    if h_max >= horizon
+                    else (
+                        f" ⚠️ Este plazo (H={horizon}) supera el límite de suficiencia "
+                        f"walk-forward de la sección 5.5 para este activo (H_max={h_max} "
+                        "con los datos actuales) — el pronóstico puntual igual se "
+                        "calcula, pero no está validado con la misma rigurosidad que "
+                        "uno dentro del límite."
+                    )
+                )
+                currency_note = (
+                    f" (precio cotizado en {asset.currency})"
+                    if asset.currency and asset.currency.upper() != "USD"
+                    else ""
+                )
+
+                st.markdown(f"**{ticker}** — ${amount:,.2f} invertidos{currency_note}")
+                st.markdown(
+                    f"- Precio actual (último dato: {last_date.date()}): {p0:,.4f}\n"
+                    f"- Modelo: {dist.model_name} · Plazo: {horizon} periodo(s) de "
+                    f"frecuencia '{pf_frequency}'\n"
+                    f"- Valor esperado (mediana): ${value_median:,.2f}\n"
+                    f"- Rango 90% de confianza: entre ${value_q05:,.2f} y ${value_q95:,.2f}\n"
+                    f"- Probabilidad de terminar por encima de lo invertido: "
+                    f"{dist.prob_above_entry:.1%}" + suficiencia_nota
+                )
+                st.divider()
 
 def main() -> None:
     render_header()
@@ -932,6 +1058,7 @@ def main() -> None:
     render_historical_analysis()
     render_forecast()
     render_comparison()
+    render_portfolio_forecast()
     render_sovereign_rates()
 
     if not DEV_MODE and st.button("Cerrar sesión"):
