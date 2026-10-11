@@ -123,11 +123,20 @@ def build_comparison(
     # el precio tal cual; si no, se necesita el tipo de cambio en fx_rates
     # alineado por fecha (forward-fill para días sin cotización de la divisa,
     # igual que un feriado); si no hay tasa suficiente, el activo se excluye.
-    compatible: "dict[str, pd.DataFrame]" = {}
+        compatible: "dict[str, pd.DataFrame]" = {}
     for ticker, asset in ok_assets.items():
         currency = (asset.currency or "N/D").upper()
+
+        # Normaliza fechas sin zona horaria (distintas bolsas usan distintas
+        # zonas horarias en yfinance; sin esto, fechas del "mismo día" no
+        # coinciden al comparar/alinear entre activos o con el tipo de cambio).
+        asset_prices = asset.prices
+        if asset_prices.index.tz is not None:
+            asset_prices = asset_prices.copy()
+            asset_prices.index = asset_prices.index.tz_localize(None)
+
         if currency == base_currency:
-            compatible[ticker] = asset.prices
+            compatible[ticker] = asset_prices
             continue
 
         fx_series = fx_rates.get(currency)
@@ -143,7 +152,11 @@ def build_comparison(
             )
             continue
 
-        aligned_fx = fx_series.reindex(asset.prices.index).ffill()
+        if fx_series.index.tz is not None:
+            fx_series = fx_series.copy()
+            fx_series.index = fx_series.index.tz_localize(None)
+
+        aligned_fx = fx_series.reindex(asset_prices.index).ffill()
         valid = aligned_fx.notna()
         if int(valid.sum()) < 2:
             excluded.append(
@@ -157,7 +170,7 @@ def build_comparison(
             )
             continue
 
-        converted_close = asset.prices.loc[valid, "adjusted_close"] * aligned_fx[valid]
+        converted_close = asset_prices.loc[valid, "adjusted_close"] * aligned_fx[valid]
         compatible[ticker] = pd.DataFrame({"adjusted_close": converted_close})
 
     if not compatible:
