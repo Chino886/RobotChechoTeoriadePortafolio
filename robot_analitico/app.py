@@ -868,18 +868,23 @@ def render_sovereign_rates() -> None:
 def render_portfolio_forecast() -> None:
     """
     Pronóstico individual por activo para una canasta con montos invertidos en
-    USD (ampliación de RF-13 a RF-15): cada activo se pronostica por separado
+    USD (ampliación de RF-13 a RF-18): cada activo se pronostica por separado
     con su propio historial — no es un portafolio combinado, no hay pesos
     conjuntos, covarianzas ni frontera eficiente, solo una lista de
-    pronósticos independientes, uno por activo.
+    pronósticos independientes, uno por activo. Para cada activo se muestran
+    ambos modelos (caminata aleatoria y lognormal con deriva), el VaR del
+    monto invertido, la validación histórica walk-forward del modelo para ese
+    activo, y la señal de entrada/salida con costos (reutilizando las mismas
+    fórmulas de las pestañas de Pronóstico y Riesgo de arriba).
     """
     st.divider()
     st.subheader("Pronóstico por canasta de inversión (monto en USD por activo)")
     st.caption(
         "Cada activo se pronostica por separado con su propio historial — no es "
         "un portafolio combinado (no hay correlaciones conjuntas ni frontera "
-        "eficiente). Sirve para ver, activo por activo, cuánto podría valer lo "
-        "invertido en cada uno a cierto plazo."
+        "eficiente). Para cada uno se muestran los dos modelos, el VaR del "
+        "monto invertido, qué tan confiable ha sido el modelo históricamente "
+        "con ese activo (walk-forward), y si hay una señal de entrada sustentada."
     )
 
     default_text = "AAPL, 10\nGOOGL, 50\nGXTESCOL, 40"
@@ -898,13 +903,29 @@ def render_portfolio_forecast() -> None:
     with col3:
         pf_frequency = st.selectbox("Frecuencia", list(FREQUENCY_RULES.keys()), key="pf_frequency")
 
-    col_model, col_h = st.columns(2)
-    with col_model:
-        pf_model_label = st.selectbox("Modelo", list(FORECAST_MODELS.keys()), key="pf_model")
-    with col_h:
-        pf_horizon = st.number_input(
-            f"Plazo H (en periodos de frecuencia '{pf_frequency}')",
-            min_value=1, value=10, step=1, key="pf_horizon",
+    pf_horizon = st.number_input(
+        f"Plazo H (en periodos de frecuencia '{pf_frequency}')",
+        min_value=1, value=10, step=1, key="pf_horizon",
+    )
+
+    col_conf, col_cb, col_cs, col_brmin = st.columns(4)
+    with col_conf:
+        pf_confidence_label = st.selectbox("Nivel de confianza del VaR", ["95%", "99%"], key="pf_confidence")
+        pf_confidence = 0.95 if pf_confidence_label == "95%" else 0.99
+    with col_cb:
+        pf_c_b = st.number_input(
+            "Costo de compra c_b", min_value=0.0, value=DEFAULT_CB, step=0.001,
+            format="%.4f", key="pf_cb",
+        )
+    with col_cs:
+        pf_c_s = st.number_input(
+            "Costo de venta c_s", min_value=0.0, value=DEFAULT_CS, step=0.001,
+            format="%.4f", key="pf_cs",
+        )
+    with col_brmin:
+        pf_br_min = st.number_input(
+            "BR_min (beneficio/riesgo neto mínimo)", min_value=0.0, value=DEFAULT_BR_MIN,
+            step=0.1, key="pf_br_min",
         )
 
     if st.button("Pronosticar canasta"):
@@ -932,9 +953,11 @@ def render_portfolio_forecast() -> None:
             st.error("No hay activos válidos para pronosticar.")
             return
 
-        fit_fn = FORECAST_MODELS[pf_model_label]
         horizon = int(pf_horizon)
         periods_per_year = FREQUENCY_PERIODS_PER_YEAR[pf_frequency]
+        risk_params = RiskParameters(
+            p_l=DEFAULT_PL, p_u=DEFAULT_PU, br_min=pf_br_min, c_b=pf_c_b, c_s=pf_c_s,
+        )
 
         with st.spinner(f"Descargando y pronosticando {len(entries)} activo(s)..."):
             for ticker, amount in entries:
@@ -955,41 +978,80 @@ def render_portfolio_forecast() -> None:
 
                 p0 = float(prices.iloc[-1])
                 last_date = prices.index[-1]
-                model = fit_fn(returns)
-                dist = terminal_distribution(model, p0, horizon)
-
-                value_median = amount * (dist.median_price / p0)
-                value_q05 = amount * (dist.q05_price / p0)
-                value_q95 = amount * (dist.q95_price / p0)
-
                 h_max = max_valid_horizon(len(returns), periods_per_year)
-                suficiencia_nota = (
-                    ""
-                    if h_max >= horizon
-                    else (
-                        f" ⚠️ Este plazo (H={horizon}) supera el límite de suficiencia "
-                        f"walk-forward de la sección 5.5 para este activo (H_max={h_max} "
-                        "con los datos actuales) — el pronóstico puntual igual se "
-                        "calcula, pero no está validado con la misma rigurosidad que "
-                        "uno dentro del límite."
-                    )
-                )
                 currency_note = (
                     f" (precio cotizado en {asset.currency})"
                     if asset.currency and asset.currency.upper() != "USD"
                     else ""
                 )
 
-                st.markdown(f"**{ticker}** — ${amount:,.2f} invertidos{currency_note}")
-                st.markdown(
-                    f"- Precio actual (último dato: {last_date.date()}): {p0:,.4f}\n"
-                    f"- Modelo: {dist.model_name} · Plazo: {horizon} periodo(s) de "
-                    f"frecuencia '{pf_frequency}'\n"
-                    f"- Valor esperado (mediana): ${value_median:,.2f}\n"
-                    f"- Rango 90% de confianza: entre ${value_q05:,.2f} y ${value_q95:,.2f}\n"
-                    f"- Probabilidad de terminar por encima de lo invertido: "
-                    f"{dist.prob_above_entry:.1%}" + suficiencia_nota
-                )
+                st.markdown(f"### {ticker} — ${amount:,.2f} invertidos{currency_note}")
+                st.caption(f"Precio actual (último dato: {last_date.date()}): {p0:,.4f}")
+
+                for model_label, fit_fn in FORECAST_MODELS.items():
+                    model = fit_fn(returns)
+                    dist = terminal_distribution(model, p0, horizon)
+
+                    value_median = amount * (dist.median_price / p0)
+                    value_mean = amount * (dist.mean_price / p0)
+                    value_q05 = amount * (dist.q05_price / p0)
+                    value_q95 = amount * (dist.q95_price / p0)
+
+                    var_result = compute_var(model, p0, horizon, pf_confidence, amount)
+                    wf = walk_forward_validate(returns, fit_fn, model_label, horizon, periods_per_year)
+                    signal = evaluate_signal(model, p0, horizon, risk_params)
+                    probs = terminal_probabilities(model, p0, horizon, signal.p_be)
+
+                    suficiencia_nota = (
+                        ""
+                        if h_max >= horizon
+                        else (
+                            f" ⚠️ Este plazo (H={horizon}) supera el límite de suficiencia "
+                            f"walk-forward de la sección 5.5 para este activo (H_max={h_max} "
+                            "con los datos actuales) — el pronóstico puntual igual se calcula."
+                        )
+                    )
+
+                    if wf.ok:
+                        wf_texto = (
+                            f"con los últimos {wf.n_origins} orígenes de prueba: error "
+                            f"promedio (RMSE) {wf.rmse:.6f}, cobertura real del intervalo "
+                            f"90% = {wf.coverage_90:.1%}"
+                            + (
+                                f", acierto de dirección = {wf.directional_accuracy:.1%}"
+                                if wf.directional_accuracy is not None
+                                else ", acierto de dirección no definido (modelo sin deriva)"
+                            )
+                        )
+                    else:
+                        wf_texto = f"validación insuficiente — {wf.reason}"
+
+                    if signal.ok:
+                        signal_texto = (
+                            f"✅ Señal sustentada — entrada: {signal.entry:.4f}, "
+                            f"stop-loss: {signal.sl_h:.4f}, take-profit: {signal.tp_h:.4f}, "
+                            f"BR_neto: {signal.br_neto:.2f}"
+                        )
+                    else:
+                        signal_texto = "❌ No hay señal sustentada: " + "; ".join(signal.reasons)
+
+                    with st.expander(f"Modelo: {model_label}{suficiencia_nota}"):
+                        st.markdown(
+                            f"- Valor esperado (mediana): ${value_median:,.2f} · "
+                            f"(media): ${value_mean:,.2f}\n"
+                            f"- Rango 90% de confianza: entre ${value_q05:,.2f} y ${value_q95:,.2f}\n"
+                            f"- Probabilidad de terminar por encima de lo invertido: "
+                            f"{dist.prob_above_entry:.1%}\n"
+                            f"- VaR ({pf_confidence_label}): pérdida máxima esperada de "
+                            f"${var_result.var_dollar:,.2f} ({var_result.var_fraction:.1%} "
+                            "del monto invertido)\n"
+                            f"- Validación histórica (walk-forward): {wf_texto}\n"
+                            f"- {signal_texto}\n"
+                            f"- Probabilidad de ganar/perder frente al punto de equilibrio "
+                            f"(con costos c_b={pf_c_b}, c_s={pf_c_s}): "
+                            f"{probs.prob_win:.1%} ganar / {probs.prob_lose:.1%} perder"
+                        )
+
                 st.divider()
 
 def main() -> None:
