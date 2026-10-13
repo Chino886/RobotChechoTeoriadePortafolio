@@ -167,6 +167,22 @@ DISCLAIMER_TEXT = (
 )
 
 
+def _logo_svg(size: int = 44, gradient_id: str = "vantisGrad") -> str:
+    """
+    SVG del logo (static/logo.svg) con tamaño y id de gradiente ajustables:
+    si se inserta dos veces en la página, cada copia necesita su propio id.
+    Devuelve 💠 si el archivo no está, para no romper el encabezado.
+    """
+    try:
+        svg = LOGO_PATH.read_text()
+    except OSError:
+        return "💠"
+    return (
+        svg.replace('width="44" height="44"', f'width="{size}" height="{size}"')
+        .replace("vantisGrad", gradient_id)
+    )
+
+
 def render_header() -> None:
     st.set_page_config(page_title=SYSTEM_NAME, page_icon="📊", layout="wide")
     # Estilo visual (tema oscuro fintech). OJO: esta CSS apunta a atributos
@@ -220,10 +236,7 @@ def render_header() -> None:
         """,
         unsafe_allow_html=True,
     )
-    try:
-        svg_content = LOGO_PATH.read_text()
-    except OSError:
-        svg_content = "💠"  # si falta el archivo, el encabezado no se rompe
+    svg_content = _logo_svg()
     st.markdown(
         f'<div style="display:flex; align-items:center; gap:12px;">{svg_content}'
         f'<h1 style="margin:0;">{BRAND_NAME}</h1></div>',
@@ -264,13 +277,18 @@ def render_sidebar_style() -> None:
             font-size: 1.25rem;
             font-weight: 700;
             color: #E6E6E6;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
     st.sidebar.markdown(
-        f'<div class="vantis-sidebar-brand">💠 {BRAND_NAME}</div>', unsafe_allow_html=True
+        f'<div class="vantis-sidebar-brand">{_logo_svg(28, "vantisGradSidebar")}'
+        f"<span>{BRAND_NAME}</span></div>",
+        unsafe_allow_html=True,
     )
 
 
