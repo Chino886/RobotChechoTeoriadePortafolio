@@ -4,6 +4,7 @@ Robot analítico para la preselección de activos - Teoría Moderna de
 Portafolios, Tech Business School - Universidad EIA.
 """
 import json
+from pathlib import Path
 
 import feedparser
 import pandas as pd
@@ -73,6 +74,9 @@ DEV_MODE = True
 # ---------------------------------------------------------------------------
 SYSTEM_NAME = "Pre - Asset Allocation Analytic Bot"
 BRAND_NAME = "Vantis"  # marca visual; SYSTEM_NAME sigue siendo el nombre oficial del entregable
+# Relativo a este archivo (no al directorio de trabajo): Streamlit Cloud corre la
+# app desde la raíz del repo, no desde robot_analitico/.
+LOGO_PATH = Path(__file__).parent / "static" / "logo.svg"
 TEAM_NAME = "Equipo DPST"
 MEMBERS = [
     "Sergio Delgado Laverde",
@@ -163,6 +167,22 @@ DISCLAIMER_TEXT = (
 )
 
 
+def _logo_svg(size: int = 44, gradient_id: str = "vantisGrad") -> str:
+    """
+    SVG del logo (static/logo.svg) con tamaño y id de gradiente ajustables:
+    si se inserta dos veces en la página, cada copia necesita su propio id.
+    Devuelve 💠 si el archivo no está, para no romper el encabezado.
+    """
+    try:
+        svg = LOGO_PATH.read_text()
+    except OSError:
+        return "💠"
+    return (
+        svg.replace('width="44" height="44"', f'width="{size}" height="{size}"')
+        .replace("vantisGrad", gradient_id)
+    )
+
+
 def render_header() -> None:
     st.set_page_config(page_title=SYSTEM_NAME, page_icon="📊", layout="wide")
     # Estilo visual (tema oscuro fintech). OJO: esta CSS apunta a atributos
@@ -216,7 +236,12 @@ def render_header() -> None:
         """,
         unsafe_allow_html=True,
     )
-    st.title(f"💠 {BRAND_NAME}")
+    svg_content = _logo_svg()
+    st.markdown(
+        f'<div style="display:flex; align-items:center; gap:12px;">{svg_content}'
+        f'<h1 style="margin:0;">{BRAND_NAME}</h1></div>',
+        unsafe_allow_html=True,
+    )
     st.caption(f"{SYSTEM_NAME} · {TEAM_NAME} · versión {VERSION} · última actualización {LAST_UPDATE}")
     with st.expander("Equipo e identidad"):
         for member in MEMBERS:
@@ -252,13 +277,18 @@ def render_sidebar_style() -> None:
             font-size: 1.25rem;
             font-weight: 700;
             color: #E6E6E6;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
     st.sidebar.markdown(
-        f'<div class="vantis-sidebar-brand">💠 {BRAND_NAME}</div>', unsafe_allow_html=True
+        f'<div class="vantis-sidebar-brand">{_logo_svg(28, "vantisGradSidebar")}'
+        f"<span>{BRAND_NAME}</span></div>",
+        unsafe_allow_html=True,
     )
 
 
@@ -278,28 +308,36 @@ def render_disclaimer_gate(user_name: str, user_email: str) -> None:
     completo de sesión/auditoría/purga de la Fase 9 (ver TRACEABILITY.md,
     RF-02, RNF-03).
     """
+    if st.session_state.get("terms_accepted", False):
+        return
+
     st.subheader("Antes de continuar")
     st.warning(DISCLAIMER_TEXT)
 
     privacy_ok = st.checkbox(
-        "Autorizo el tratamiento de mis datos según el aviso de privacidad del "
-        "piloto académico (Ley 1581 de 2012).",
-        value=False,
-        key="consent_privacy",
+        "Autorizo el tratamiento de mis datos según el aviso de "
+        "privacidad del piloto académico (Ley 1581 de 2012).",
+        value=False, key="consent_privacy",
     )
     disclaimer_ok = st.checkbox(
         "He leído y acepto el disclaimer académico anterior.",
-        value=False,
-        key="consent_disclaimer",
+        value=False, key="consent_disclaimer",
     )
 
-    if not (privacy_ok and disclaimer_ok):
+    accept_clicked = st.button(
+        "✅ Aceptar y continuar",
+        type="primary",
+        disabled=not (privacy_ok and disclaimer_ok),
+    )
+
+    if not accept_clicked:
         st.session_state["access_logged"] = False
         st.stop()
 
-    if not st.session_state.get("access_logged", False):
-        access_log.log_access(user_name, user_email, privacy_ok, disclaimer_ok)
-        st.session_state["access_logged"] = True
+    access_log.log_access(user_name, user_email, privacy_ok, disclaimer_ok)
+    st.session_state["access_logged"] = True
+    st.session_state["terms_accepted"] = True
+    st.rerun()
 
 
 def render_historical_analysis() -> None:
@@ -1719,7 +1757,35 @@ def render_news_panel() -> None:
         st.info("No se pudieron cargar las noticias en este momento.")
 
 
+# dismissible=False: sin X ni Esc. Si se pudiera cerrar así, la app quedaría
+# en blanco (todo lo demás está detenido con st.stop hasta que se responda).
+@st.dialog("⚠️ Antes de entrar", dismissible=False)
+def render_intro_alert():
+    st.write(
+        "Esta app está hecha para mirar comportamientos históricos y "
+        "de pronóstico de activos individuales con fines académicos. "
+        "**No se hace responsable por el mal uso que se le dé.**"
+    )
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Continuar", type="primary", use_container_width=True):
+            st.session_state["intro_ack"] = True
+            st.rerun()
+    with col2:
+        if st.button("Cancelar", use_container_width=True):
+            st.session_state["intro_cancelled"] = True
+            st.rerun()
+
+
 def main() -> None:
+    if st.session_state.get("intro_cancelled", False):
+        st.info("Saliste de la aplicación. Puedes cerrar esta pestaña.")
+        st.stop()
+
+    if not st.session_state.get("intro_ack", False):
+        render_intro_alert()
+        st.stop()
+
     render_header()
     render_sidebar_style()
 
