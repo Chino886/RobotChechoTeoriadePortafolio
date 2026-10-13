@@ -5,8 +5,11 @@ Portafolios, Tech Business School - Universidad EIA.
 """
 import json
 
+import feedparser
 import pandas as pd
+import requests
 import streamlit as st
+import yfinance as yf
 
 from src import access_log
 from src.analytics import (
@@ -1228,6 +1231,213 @@ def render_portfolio_forecast() -> None:
 
                 st.divider()
 
+NEWS_CACHE_TTL_SECONDS = 1800  # 30 min: evita repetir llamadas externas en cada interacción
+
+
+def _format_news_date(raw) -> str:
+    """Normaliza las fechas de las tres fuentes a 'AAAA-MM-DD HH:MM'; si no se puede, deja el texto original."""
+    if not raw:
+        return "fecha N/D"
+    try:
+        return pd.to_datetime(raw).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return str(raw)
+
+
+@st.cache_data(ttl=NEWS_CACHE_TTL_SECONDS, show_spinner=False)
+def get_google_news_rss(query: str, max_items: int = 5) -> "list[dict]":
+    """Noticias de Google News (RSS en español, edición Colombia). Devuelve [] si falla."""
+    try:
+        url = (
+            f"https://news.google.com/rss/search?q={requests.utils.quote(query)}"
+            "&hl=es-419&gl=CO&ceid=CO:es"
+        )
+        feed = feedparser.parse(url)
+        return [
+            {
+                "title": entry.title,
+                "link": entry.link,
+                "publisher": entry.get("source", {}).get("title", "Google News"),
+                "published": entry.published,
+            }
+            for entry in feed.entries[:max_items]
+        ]
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=NEWS_CACHE_TTL_SECONDS, show_spinner=False)
+def get_alpha_vantage_news(
+    tickers: "str | None", topics: "str | None", max_items: int = 5
+) -> "list[dict]":
+    """
+    Noticias de Alpha Vantage (NEWS_SENTIMENT). Sin API key, con límite
+    excedido ('Note'/'Information') o ante cualquier fallo devuelve [] en
+    silencio: la fuente simplemente se omite.
+    """
+    try:
+        api_key = st.secrets.get("ALPHA_VANTAGE_API_KEY")
+    except Exception:  # sin secrets.toml, st.secrets lanza en vez de devolver None
+        api_key = None
+    if not api_key:
+        return []
+    params = {"function": "NEWS_SENTIMENT", "apikey": api_key, "limit": max_items}
+    if tickers:
+        params["tickers"] = tickers
+    elif topics:
+        params["topics"] = topics
+    try:
+        data = requests.get("https://www.alphavantage.co/query", params=params, timeout=10).json()
+        if "Note" in data or "Information" in data or "feed" not in data:
+            return []
+        return [
+            {
+                "title": item["title"],
+                "link": item["url"],
+                "publisher": item["source"],
+                "published": item["time_published"],
+            }
+            for item in data["feed"][:max_items]
+        ]
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=NEWS_CACHE_TTL_SECONDS, show_spinner=False)
+def _get_yfinance_news(ticker: str, max_items: int = 3) -> "list[dict]":
+    """Noticias de Yahoo Finance vía yfinance (clave 'content'). Devuelve [] si falla."""
+    try:
+        items = []
+        for raw in (yf.Ticker(ticker).news or [])[:max_items]:
+            content = raw.get("content") or {}
+            title = content.get("title")
+            link = (content.get("canonicalUrl") or {}).get("url")
+            if not title or not link:
+                continue
+            items.append(
+                {
+                    "title": title,
+                    "link": link,
+                    "publisher": (content.get("provider") or {}).get("displayName", "Yahoo Finance"),
+                    "published": content.get("pubDate"),
+                }
+            )
+        return items
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=NEWS_CACHE_TTL_SECONDS, show_spinner=False)
+def _get_yfinance_milestones(ticker: str) -> "list[str]":
+    """
+    Hitos del activo vía yfinance: próximos eventos del calendario
+    (resultados, dividendos), últimos 3 dividendos y últimos 3 splits.
+    Cada parte va en su propio try/except: si una falla, se omite.
+    """
+    lines = []
+    try:
+        yf_ticker = yf.Ticker(ticker)
+    except Exception:
+        return lines
+
+    try:
+        calendar = yf_ticker.calendar
+        if isinstance(calendar, pd.DataFrame):
+            calendar = {col: calendar[col].tolist() for col in calendar.columns}
+        for key in ("Earnings Date", "Ex-Dividend Date", "Dividend Date"):
+            value = (calendar or {}).get(key)
+            if value is None or (isinstance(value, list) and not value):
+                continue
+            if isinstance(value, list):
+                value = ", ".join(str(v) for v in value)
+            label = {
+                "Earnings Date": "Próxima publicación de resultados",
+                "Ex-Dividend Date": "Fecha ex-dividendo",
+                "Dividend Date": "Fecha de pago de dividendo",
+            }[key]
+            lines.append(f"📅 {label}: {value}")
+    except Exception:
+        pass
+
+    try:
+        for date, amount in yf_ticker.dividends.tail(3).items():
+            lines.append(f"💵 Dividendo {date.date()}: {amount:,.4f}")
+    except Exception:
+        pass
+
+    try:
+        for date, ratio in yf_ticker.splits.tail(3).items():
+            lines.append(f"✂️ Split {date.date()}: {ratio:g} por 1")
+    except Exception:
+        pass
+
+    return lines
+
+
+def _render_news_block(source_label: str, items: "list[dict]") -> None:
+    """Muestra en el sidebar un bloque de noticias con el rótulo de su fuente."""
+    if not items:
+        return
+    st.sidebar.caption(f"**{source_label}**")
+    for item in items:
+        # Los corchetes en el título romperían el link en Markdown.
+        title = str(item.get("title", "")).replace("[", "(").replace("]", ")")
+        st.sidebar.markdown(
+            f"- [{title}]({item.get('link', '')}) — *{item.get('publisher', 'N/D')}*, "
+            f"{_format_news_date(item.get('published'))}"
+        )
+
+
+def render_news_sidebar() -> None:
+    """
+    Noticias e hitos en el sidebar, separados de las pestañas de análisis.
+    Es contenido informativo: no entra en ningún cálculo del bot. Cualquier
+    fallo se captura aquí para no interrumpir el resto de la app.
+    """
+    try:
+        result = st.session_state.get("asset_result")
+        st.sidebar.divider()
+        st.sidebar.subheader("📰 Noticias e hitos")
+        st.sidebar.caption(
+            "Fuentes: Yahoo Finance, Google News y Alpha Vantage. Cada "
+            "noticia muestra su medio original y su link real; esta sección "
+            "es informativa, no hace parte del análisis cuantitativo del bot."
+        )
+
+        if result is not None and result.ok:
+            st.sidebar.markdown(f"**Noticias de {result.ticker}**")
+
+            milestones = _get_yfinance_milestones(result.ticker)
+            if milestones:
+                st.sidebar.caption("**Hitos**")
+                for line in milestones:
+                    st.sidebar.markdown(f"- {line}")
+
+            yahoo_items = _get_yfinance_news(result.ticker, max_items=3)
+            google_items = get_google_news_rss(result.ticker, max_items=3)
+            alpha_items = get_alpha_vantage_news(tickers=result.ticker, topics=None, max_items=3)
+
+            _render_news_block("Yahoo Finance", yahoo_items)
+            _render_news_block("Google News", google_items)
+            _render_news_block("Alpha Vantage", alpha_items)
+
+            if not (yahoo_items or google_items or alpha_items):
+                st.sidebar.info("No se encontraron noticias para este activo en este momento.")
+
+        st.sidebar.markdown("**Noticias generales del mercado**")
+        general_google = get_google_news_rss("mercados financieros bolsa de valores", max_items=3)
+        general_alpha = get_alpha_vantage_news(
+            tickers=None, topics="economy_macro,financial_markets", max_items=3
+        )
+        _render_news_block("Google News", general_google)
+        _render_news_block("Alpha Vantage", general_alpha)
+
+        if not (general_google or general_alpha):
+            st.sidebar.info("No se encontraron noticias generales en este momento.")
+    except Exception:
+        st.sidebar.info("No se pudieron cargar noticias/hitos en este momento.")
+
+
 def main() -> None:
     render_header()
 
@@ -1250,6 +1460,7 @@ def main() -> None:
         user_name, user_email = getattr(user, "name", "?"), getattr(user, "email", "?")
 
     render_disclaimer_gate(user_name, user_email)
+    render_news_sidebar()
 
     st.success(f"Sesión iniciada como {user_name} ({user_email})")
 
