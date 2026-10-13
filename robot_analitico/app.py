@@ -731,34 +731,77 @@ def render_comparison() -> None:
             "'mejor según este criterio y estos parámetros', nunca como la mejor inversión "
             "en términos absolutos."
         )
-        criterion = st.selectbox(
-            "Criterio",
-            [
-                "Máxima media histórica bajo límite de riesgo",
-                "Mínima volatilidad bajo media mínima",
-                "Máxima razón individual media-volatilidad (RVR)",
-                "Conjunto no dominado (media-volatilidad)",
-            ],
-            key="comparison_criterion",
+        st.write("")
+        selection_mode = st.radio(
+            "👤 ¿Cómo quieres elegir el activo preseleccionado?",
+            ["Por perfil de riesgo (recomendado)", "Manual (elijo el criterio yo mismo)"],
+            horizontal=True,
+            key="comparison_selection_mode",
         )
-        st.caption(CRITERION_EXPLANATIONS[criterion])
+        st.write("")
 
-        if criterion == "Máxima media histórica bajo límite de riesgo":
-            risk_limit = st.number_input(
-                "Límite de riesgo (volatilidad anualizada máxima aceptable)",
-                min_value=0.0, value=0.30, step=0.01, format="%.4f", key="comparison_risk_limit",
-            )
-            selected = preselect_max_mean_under_risk_limit(result.summaries, risk_limit)
-        elif criterion == "Mínima volatilidad bajo media mínima":
-            min_mean = st.number_input(
-                "Media histórica anualizada mínima aceptable",
-                value=0.0, step=0.01, format="%.4f", key="comparison_min_mean",
-            )
-            selected = preselect_min_vol_under_min_mean(result.summaries, min_mean)
-        elif criterion == "Máxima razón individual media-volatilidad (RVR)":
-            selected = preselect_max_rvr(result.summaries)
+        if selection_mode == "Por perfil de riesgo (recomendado)":
+            risk_profile_explanations = {
+                "🟢 Conservador": (
+                    "Prioriza la estabilidad: elige el activo con menor volatilidad "
+                    "entre los que no han tenido rendimiento promedio negativo."
+                ),
+                "🟡 Moderado": (
+                    "Busca equilibrio: elige el activo que más rendimiento ha dado "
+                    "por cada unidad de volatilidad (mayor razón media-volatilidad)."
+                ),
+                "🔴 Agresivo": (
+                    "Prioriza el rendimiento: elige el activo con mayor media histórica "
+                    "aceptando una volatilidad anualizada de hasta 40%."
+                ),
+            }
+            col_profile, _ = st.columns([2, 1])
+            with col_profile:
+                risk_profile = st.selectbox(
+                    "¿Qué tan arriesgado quieres ser?",
+                    list(risk_profile_explanations.keys()),
+                    index=1,
+                    key="comparison_risk_profile",
+                )
+            with st.container(border=True):
+                st.markdown(f"**Perfil {risk_profile}**")
+                st.caption(risk_profile_explanations[risk_profile])
+
+            if risk_profile == "🟢 Conservador":
+                selected = preselect_min_vol_under_min_mean(result.summaries, min_mean=0.0)
+            elif risk_profile == "🟡 Moderado":
+                selected = preselect_max_rvr(result.summaries)
+            else:
+                selected = preselect_max_mean_under_risk_limit(result.summaries, risk_limit=0.40)
         else:
-            selected = preselect_non_dominated(result.summaries)
+            criterion = st.selectbox(
+                "Criterio",
+                [
+                    "Máxima media histórica bajo límite de riesgo",
+                    "Mínima volatilidad bajo media mínima",
+                    "Máxima razón individual media-volatilidad (RVR)",
+                    "Conjunto no dominado (media-volatilidad)",
+                ],
+                key="comparison_criterion",
+            )
+            st.caption(CRITERION_EXPLANATIONS[criterion])
+
+            if criterion == "Máxima media histórica bajo límite de riesgo":
+                risk_limit = st.number_input(
+                    "Límite de riesgo (volatilidad anualizada máxima aceptable)",
+                    min_value=0.0, value=0.30, step=0.01, format="%.4f", key="comparison_risk_limit",
+                )
+                selected = preselect_max_mean_under_risk_limit(result.summaries, risk_limit)
+            elif criterion == "Mínima volatilidad bajo media mínima":
+                min_mean = st.number_input(
+                    "Media histórica anualizada mínima aceptable",
+                    value=0.0, step=0.01, format="%.4f", key="comparison_min_mean",
+                )
+                selected = preselect_min_vol_under_min_mean(result.summaries, min_mean)
+            elif criterion == "Máxima razón individual media-volatilidad (RVR)":
+                selected = preselect_max_rvr(result.summaries)
+            else:
+                selected = preselect_non_dominated(result.summaries)
 
         if selected:
             tie_note = " (empate)" if len(selected) > 1 else ""
