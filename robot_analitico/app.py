@@ -1657,7 +1657,7 @@ def main() -> None:
     with col3:
         end_date = st.date_input("Fecha final", value=pd.Timestamp.today())
 
-    frequency = st.selectbox("Frecuencia", list(FREQUENCY_RULES.keys()))
+    frequency = st.selectbox("Frecuencia (Semanal recomendada: menos ruido que Diaria)", list(FREQUENCY_RULES.keys()))
 
     if st.button("Descargar y limpiar"):
         with st.spinner("Descargando..."):
