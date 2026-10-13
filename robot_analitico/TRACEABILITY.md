@@ -31,7 +31,7 @@ cada requisito. Base: sección 8.2 de la guía evaluativa.
 | RNF-02 | T-24, T-25 | G9 | D1, D4, D5, D12 | Pendiente (Fase 9: healthcheck de web/BD/scheduler/notifications_worker/lifecycle_worker). |
 | RNF-03 | T-18 a T-24 | G10 | D5, D6, D7, D12 | Parcial: `src/access_log.py` deja un registro local no verificado de acceso/consentimiento (ver evidencia de RF-01) ante la confirmación de que el curso no suministrará BD/sink/gestor de secretos. Pendiente (Fase 9): identidad verificada por OIDC, allowlist, mínimo privilegio, purga, `deletion_markers`, gestión de secretos. |
 | RNF-04 | T-01 a T-25 | G9 | D6, D12 | Suite `tests/` completa para los casos no relacionados con seguridad: 54 pruebas pasando (`pytest tests/ -v`), verificadas con tolerancia atol=1e-8/rtol=1e-10 contra los fixtures oficiales de la guía (`Fixture_20_activos_sintetico_TBS_EIA.csv`, `Resultados_esperados_20_activos_TBS_EIA.csv`). Ninguna función de señal o preselección fuerza un resultado: `SignalResult.ok=False` y `preselect_*` devolviendo lista vacía están cubiertos por prueba. Pendiente: T-18 a T-24 (seguridad/sesión/worker, Fase 9). |
-| RNF-05 | Revisión documental | G11 | D3, D8, D9, D12 | En curso (Fase 11): `README.md` (política de ejecución y referencias completadas), `AI_USAGE.md` (registro por fase), `TRACEABILITY.md` (este archivo). Pendiente: `CONTRIBUTIONS.md` con los datos reales del equipo. |
+| RNF-05 | Revisión documental | G11 | D3, D8, D9, D12 | En curso (Fase 11): `README.md` (política de ejecución y referencias completadas), `AI_USAGE.md` (registro por fase), `TRACEABILITY.md` (este archivo). |
 
 ## Entregables (D1-D12)
 
@@ -43,7 +43,7 @@ cada requisito. Base: sección 8.2 de la guía evaluativa.
 - D6. Pruebas T-01 a T-25, cobertura, fixtures, mocks, tolerancias. **Completado para los casos no relacionados con seguridad (54 pruebas). Pendientes T-18 a T-24 (Fase 9).**
 - D7. Evidencia anonimizada del flujo OIDC/consentimiento/sesión/outbox/worker/purga. **Pendiente (Fase 9).**
 - D8. `AI_USAGE.md`. **Completado en esta fase.**
-- D9. `CONTRIBUTIONS.md`. **Pendiente: requiere los nombres, módulos y commits reales de cada integrante del equipo.**
+- D9. `CONTRIBUTIONS.md`. **Completado** — nombres reales del equipo y autoevaluación de "puede explicar y defender" diligenciados.
 - D10. Dos exportaciones de ejemplo (1 activo; 20 activos + 1 inválido). **Pendiente: generar y guardar los archivos de ejemplo (Fase 12).**
 - D11. Video (máx. 5 min). **Pendiente (Fase 12).**
 - D12. `TRACEABILITY.md` (este archivo) enlazado al commit final.
