@@ -1350,51 +1350,135 @@ def _get_yfinance_news(ticker: str, max_items: int = 3) -> "list[dict]":
         return []
 
 
+MILESTONE_TOP_MOVES = 3  # mayores subidas y caídas de un día que se listan
+
+
+def _news_search_link(ticker: str, date) -> str:
+    """Link a una búsqueda de noticias de Google para ese activo y esa fecha ("¿qué pasó?")."""
+    return "https://www.google.com/search?tbm=nws&q=" + requests.utils.quote(f"{ticker} {date}")
+
+
+def compute_price_milestones(
+    prices: pd.Series, ticker: str, period_label: str = "un día"
+) -> "list[tuple[str, list[str]]]":
+    """
+    Hitos históricos a partir de una serie de precios ajustados (diaria):
+    inicio del historial, máximo y mínimo históricos, peor desplome desde un
+    máximo (y si ya se recuperó), mayores subidas y caídas de un día, y
+    mejor/peor año calendario. Devuelve [(sección, [líneas markdown])].
+    """
+    prices = prices.dropna()
+    prices = prices[prices > 0]
+    if len(prices) < 2:
+        return []
+
+    def day(ts) -> str:
+        return str(pd.Timestamp(ts).date())
+
+    last_price = float(prices.iloc[-1])
+    sections = []
+
+    # Resumen: inicio, máximo y mínimo históricos.
+    first_date, first_price = prices.index[0], float(prices.iloc[0])
+    max_date, max_price = prices.idxmax(), float(prices.max())
+    min_date, min_price = prices.idxmin(), float(prices.min())
+    below_max = last_price / max_price - 1
+    summary = [
+        f"🏁 Inicio del historial: {day(first_date)} a {first_price:,.2f} "
+        f"(desde entonces: {last_price / first_price - 1:+,.0%})",
+        f"🏔️ Máximo histórico: {max_price:,.2f} el {day(max_date)}"
+        + (" — hoy está en su máximo" if below_max > -0.005 else f" — hoy está {-below_max:.0%} por debajo"),
+        f"🕳️ Mínimo histórico: {min_price:,.2f} el {day(min_date)}",
+    ]
+
+    # Peor desplome: mayor caída desde un máximo previo hasta un valle.
+    running_max = prices.cummax()
+    drawdown = prices / running_max - 1
+    trough_date = drawdown.idxmin()
+    worst_drawdown = float(drawdown.min())
+    if worst_drawdown < 0:
+        peak_date = prices.loc[:trough_date].idxmax()
+        peak_price = float(prices.loc[peak_date])
+        recovered = prices.loc[trough_date:][prices.loc[trough_date:] >= peak_price]
+        recovery = (
+            f"se recuperó el {day(recovered.index[0])}" if not recovered.empty else "aún no se recupera"
+        )
+        summary.append(
+            f"📉 Peor desplome: {worst_drawdown:.0%} desde el {day(peak_date)} "
+            f"hasta el {day(trough_date)} ({recovery})"
+        )
+    sections.append(("Resumen", summary))
+
+    # Mayores movimientos de un periodo (un día con datos diarios), con link para ver qué pasó.
+    daily = prices.pct_change().dropna()
+    if not daily.empty:
+        ups = daily.nlargest(MILESTONE_TOP_MOVES)
+        downs = daily.nsmallest(MILESTONE_TOP_MOVES)
+        sections.append((
+            f"Mayores subidas en {period_label}",
+            [f"🚀 {day(d)}: {r:+.1%} — [¿qué pasó?]({_news_search_link(ticker, day(d))})"
+             for d, r in ups.items() if r > 0],
+        ))
+        sections.append((
+            f"Mayores caídas en {period_label}",
+            [f"💥 {day(d)}: {r:+.1%} — [¿qué pasó?]({_news_search_link(ticker, day(d))})"
+             for d, r in downs.items() if r < 0],
+        ))
+
+    # Mejor y peor año calendario (cierre a cierre; el año en curso se marca).
+    yearly = prices.resample("YE").last().pct_change().dropna()
+    if not yearly.empty:
+        current_year = pd.Timestamp(prices.index[-1]).year
+
+        def year_label(ts) -> str:
+            year = pd.Timestamp(ts).year
+            return f"{year} (en curso)" if year == current_year else str(year)
+
+        best, worst = yearly.idxmax(), yearly.idxmin()
+        sections.append((
+            "Años",
+            [
+                f"🏆 Mejor año: {year_label(best)}, {yearly[best]:+.0%}",
+                f"⚠️ Peor año: {year_label(worst)}, {yearly[worst]:+.0%}",
+            ],
+        ))
+
+    return [(title, lines) for title, lines in sections if lines]
+
+
 @st.cache_data(ttl=NEWS_CACHE_TTL_SECONDS, show_spinner=False)
-def _get_yfinance_milestones(ticker: str) -> "list[str]":
+def _get_yfinance_milestones(ticker: str) -> "list[tuple[str, list[str]]]":
     """
-    Hitos del activo vía yfinance: próximos eventos del calendario
-    (resultados, dividendos), últimos 3 dividendos y últimos 3 splits.
-    Cada parte va en su propio try/except: si una falla, se omite.
+    Hitos históricos del activo con todo su historial disponible (no solo
+    el rango elegido en la app), más los splits de acciones. Devuelve [] si
+    no se pudo descargar el historial.
     """
-    lines = []
     try:
-        yf_ticker = yf.Ticker(ticker)
+        history = fetch_asset_data(ticker, "1970-01-01", pd.Timestamp.today() + pd.Timedelta(days=1))
+        if not history.ok or history.prices is None:
+            return []
+        sections = compute_price_milestones(history.prices["adjusted_close"], ticker)
     except Exception:
-        return lines
+        return []
 
     try:
-        calendar = yf_ticker.calendar
-        if isinstance(calendar, pd.DataFrame):
-            calendar = {col: calendar[col].tolist() for col in calendar.columns}
-        for key in ("Earnings Date", "Ex-Dividend Date", "Dividend Date"):
-            value = (calendar or {}).get(key)
-            if value is None or (isinstance(value, list) and not value):
-                continue
-            if isinstance(value, list):
-                value = ", ".join(str(v) for v in value)
-            label = {
-                "Earnings Date": "Próxima publicación de resultados",
-                "Ex-Dividend Date": "Fecha ex-dividendo",
-                "Dividend Date": "Fecha de pago de dividendo",
-            }[key]
-            lines.append(f"📅 {label}: {value}")
+        splits = yf.Ticker(ticker).splits
+        split_lines = [
+            f"✂️ {str(pd.Timestamp(d).date())}: {ratio:g} por 1" for d, ratio in splits.tail(5).items()
+        ]
+        if split_lines:
+            sections.append(("Divisiones de acciones (splits)", split_lines))
     except Exception:
         pass
 
-    try:
-        for date, amount in yf_ticker.dividends.tail(3).items():
-            lines.append(f"💵 Dividendo {date.date()}: {amount:,.4f}")
-    except Exception:
-        pass
+    return sections
 
-    try:
-        for date, ratio in yf_ticker.splits.tail(3).items():
-            lines.append(f"✂️ Split {date.date()}: {ratio:g} por 1")
-    except Exception:
-        pass
 
-    return lines
+def _render_milestones(sections: "list[tuple[str, list[str]]]") -> None:
+    for title, lines in sections:
+        st.caption(f"**{title}**")
+        for line in lines:
+            st.markdown(f"- {line}")
 
 
 def _collect_news(ticker: "str | None") -> "list[tuple[str, list[dict]]]":
@@ -1457,14 +1541,24 @@ def render_news_sidebar() -> None:
             "es informativa, no hace parte del análisis cuantitativo del bot."
         )
 
-        with st.sidebar.expander(f"📅 Hitos{f' de {ticker}' if ticker else ''}"):
+        with st.sidebar.expander(f"📅 Hitos históricos{f' de {ticker}' if ticker else ''}"):
             if not ticker:
                 st.caption("Descarga un activo en \"Datos: probar un activo\" para ver sus hitos.")
             else:
                 milestones = _get_yfinance_milestones(ticker)
                 if milestones:
-                    for line in milestones:
-                        st.markdown(f"- {line}")
+                    st.caption("Con todo el historial disponible en Yahoo Finance (precios ajustados).")
+                else:
+                    # Sin historial completo, se usa el rango ya descargado en la app.
+                    frequency = st.session_state.get("asset_frequency", "Diaria")
+                    milestones = compute_price_milestones(
+                        result.prices["adjusted_close"], ticker,
+                        period_label="un día" if frequency == "Diaria" else f"un periodo ({frequency.lower()})",
+                    )
+                    if milestones:
+                        st.caption("Con el rango de fechas descargado en la app.")
+                if milestones:
+                    _render_milestones(milestones)
                 else:
                     st.caption("No se encontraron hitos para este activo en este momento.")
 
