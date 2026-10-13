@@ -1085,7 +1085,7 @@ def render_portfolio_forecast() -> None:
         )
 
         with st.spinner(f"Descargando y pronosticando {len(entries)} activo(s)..."):
-            for ticker, amount in entries:
+            for entry_idx, (ticker, amount) in enumerate(entries):
                 asset = fetch_asset_data(ticker, pf_start, pf_end)
                 if not asset.ok or asset.prices is None:
                     st.error(f"**{ticker}**: {asset.error or 'sin datos'}")
@@ -1175,6 +1175,12 @@ def render_portfolio_forecast() -> None:
                             f"- Probabilidad de ganar/perder frente al punto de equilibrio "
                             f"(con costos c_b={pf_c_b}, c_s={pf_c_s}): "
                             f"{probs.prob_win:.1%} ganar / {probs.prob_lose:.1%} perder"
+                        )
+                        steps = forecast_path(model, p0, horizon)
+                        fig = forecast_chart(prices, steps, ticker, pf_frequency)
+                        st.plotly_chart(
+                            fig, use_container_width=True,
+                            key=f"pf_chart_{entry_idx}_{model_label}",
                         )
 
                 st.divider()
