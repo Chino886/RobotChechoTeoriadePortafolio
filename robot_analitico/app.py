@@ -171,6 +171,26 @@ def render_header() -> None:
     st.markdown(
         """
         <style>
+        /* Tipografía Inter (sitio web moderno) importada desde Google Fonts vía
+           @import (debe ir primero en el bloque). Requiere internet para cargar
+           la fuente; si falla, el navegador usa el fallback sans-serif y la app
+           no se rompe. Los selectores [class*="css"] y [data-testid="..."] apuntan
+           a clases internas no oficiales de Streamlit, igual que la CSS de bordes
+           redondeados de abajo, y pueden necesitar ajuste si cambia la versión. */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+        html, body, [class*="css"], [data-testid="stAppViewContainer"],
+        [data-testid="stSidebar"], [data-testid="stMarkdownContainer"],
+        [data-testid="stCaptionContainer"], .stButton button, .stSelectbox, .stTextInput input, .stTextArea textarea {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+        }
+
+        h1, h2, h3 {
+            font-family: 'Inter', sans-serif !important;
+            font-weight: 700 !important;
+            letter-spacing: -0.02em;
+        }
+
         /* Esquinas redondeadas en todos los bloques; el borde sutil solo en los
            expanders (en cada elemento se veía recargado). Los st.container con
            borde ya traen el suyo de Streamlit. */

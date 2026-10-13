@@ -17,7 +17,7 @@ DARK_LAYOUT = dict(
     template="plotly_dark",
     paper_bgcolor="#0E1117",
     plot_bgcolor="#1A1F2B",
-    font=dict(color="#E6E6E6"),
+    font=dict(family="Inter, sans-serif", color="#E6E6E6"),
 )
 
 
