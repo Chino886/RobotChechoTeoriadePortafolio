@@ -72,6 +72,7 @@ DEV_MODE = True
 # IDENTIDAD DEL EQUIPO (RF-01)
 # ---------------------------------------------------------------------------
 SYSTEM_NAME = "Pre - Asset Allocation Analytic Bot"
+BRAND_NAME = "Vantis"  # marca visual; SYSTEM_NAME sigue siendo el nombre oficial del entregable
 TEAM_NAME = "Equipo DPST"
 MEMBERS = [
     "Sergio Delgado Laverde",
@@ -164,12 +165,81 @@ DISCLAIMER_TEXT = (
 
 def render_header() -> None:
     st.set_page_config(page_title=SYSTEM_NAME, page_icon="📊", layout="wide")
-    st.title(f"📊 {SYSTEM_NAME}")
-    st.caption(f"{TEAM_NAME} · versión {VERSION} · última actualización {LAST_UPDATE}")
+    # Estilo visual (tema oscuro fintech). OJO: esta CSS apunta a atributos
+    # internos de Streamlit (data-testid), que no son API oficial; si se
+    # actualiza la versión de Streamlit puede requerir ajuste.
+    st.markdown(
+        """
+        <style>
+        /* Esquinas redondeadas en todos los bloques; el borde sutil solo en los
+           expanders (en cada elemento se veía recargado). Los st.container con
+           borde ya traen el suyo de Streamlit. */
+        [data-testid="stVerticalBlock"] > div {
+            border-radius: 12px;
+        }
+        [data-testid="stExpander"] details {
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        /* Los bloques <style> como este dejan un contenedor vacío que suma espacio. */
+        [data-testid="stElementContainer"]:has(style) {
+            display: none;
+        }
+        [data-testid="stMainBlockContainer"] {
+            padding-top: 2.5rem;
+            padding-bottom: 3rem;
+        }
+        [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {
+            gap: 1.25rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.title(f"💠 {BRAND_NAME}")
+    st.caption(f"{SYSTEM_NAME} · {TEAM_NAME} · versión {VERSION} · última actualización {LAST_UPDATE}")
     with st.expander("Equipo e identidad"):
         for member in MEMBERS:
             st.write(f"- {member}")
         st.info(EXECUTION_POLICY_SUMMARY)
+
+
+def render_sidebar_style() -> None:
+    """
+    Estilo del sidebar (tema oscuro fintech) y encabezado de marca, para que
+    el login simulado y la sección de noticias se vean como una tarjeta.
+    Como la CSS del encabezado, apunta a atributos internos de Streamlit
+    (data-testid / data-baseweb) y puede requerir ajuste si cambia la versión.
+    """
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"] {
+            background-color: #1A1F2B;
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        [data-testid="stSidebar"] [data-baseweb="input"],
+        [data-testid="stSidebar"] [data-baseweb="base-input"] {
+            border-radius: 10px;
+        }
+        .vantis-sidebar-brand {
+            padding: 0.9rem 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: 12px 12px 0 0;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-bottom: 2px solid #00FFA3;
+            background: linear-gradient(135deg, rgba(0, 255, 163, 0.12), rgba(45, 225, 252, 0.08));
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #E6E6E6;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.sidebar.markdown(
+        f'<div class="vantis-sidebar-brand">💠 {BRAND_NAME}</div>', unsafe_allow_html=True
+    )
 
 
 def render_disclaimer_gate(user_name: str, user_email: str) -> None:
@@ -721,11 +791,21 @@ def render_comparison() -> None:
         st.dataframe(table)
 
     with tab_map:
-        st.plotly_chart(risk_return_map(result.summaries, non_dominated), use_container_width=True)
+        st.markdown("**⭐ Marca tu elección final**")
+        starred = st.selectbox(
+            "¿Cuál de estos activos elegiste como tu preselección final?",
+            ["(Ninguno)"] + [s.ticker for s in result.summaries],
+            key="comparison_starred_ticker",
+        )
+        starred_value = None if starred == "(Ninguno)" else starred
+        st.plotly_chart(
+            risk_return_map(result.summaries, non_dominated, starred_value), use_container_width=True
+        )
         st.caption(
-            "Rombos rojos = activos NO dominados (ningún otro activo del lote ofrece a la "
+            "Rombos verdes = activos NO dominados (ningún otro activo del lote ofrece a la "
             "vez media igual o mayor y volatilidad igual o menor). Esto no es una frontera "
-            "eficiente de portafolios ni una recomendación de la mejor inversión universal."
+            "eficiente de portafolios ni una recomendación de la mejor inversión universal. "
+            "La estrella dorada solo marca tu elección personal; no es un criterio de preselección."
         )
 
     with tab_select:
@@ -1621,6 +1701,7 @@ def render_news_panel() -> None:
 
 def main() -> None:
     render_header()
+    render_sidebar_style()
 
     if DEV_MODE:
         st.sidebar.warning("MODO DESARROLLO: login OIDC desactivado temporalmente.")
