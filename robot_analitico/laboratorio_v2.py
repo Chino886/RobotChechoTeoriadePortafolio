@@ -1340,23 +1340,79 @@ solo cambia cuando la política del equipo lo indica.
                 help="Con cortos el rendimiento esperado puede crecer sin fin; la frontera se dibuja hasta este valor. "
                      "0 = no dibujar más allá de lo que las cotas permitan.")
         _explain("¿Qué significa cada supuesto y qué debo poner?", """
-- **Tasa libre de riesgo (rf):** lo que rinde un activo sin riesgo de impago en la moneda del análisis, por ejemplo un
-  bono del Tesoro de EE. UU. de corto plazo si trabajan en USD, o un TES de corto plazo si trabajan en COP. Se escribe
-  como tasa **efectiva anual** (0,04 = 4 %); la app la pasa a la frecuencia de los datos con (1 + rf)^(1/m) − 1.
-- **γ (aversión al riesgo):** cuánto "duele" el riesgo al inversionista en la utilidad U = rendimiento − (γ/2)·varianza.
-  Valores típicos entre 2 (tolerante) y 10 (muy conservador). No se estima de los precios: la eligen ustedes según el mandato.
-- **Peso mínimo / máximo por activo:** reglas del mandato. Mínimo 0 = no se vende en corto; máximo 0,25 = ningún activo
-  pesa más de 25 %. Si la suma de mínimos es mayor que 1 o la de máximos menor que 1, el problema es **inviable**.
-- **Sin límites:** permite cortos y apalancamiento sin tope. Útil para comparar con la teoría, pero entonces el máximo
-  rendimiento es infinito y hay que fijar un **rendimiento objetivo máximo** para dibujar la frontera.
-- **Cotas por activo y topes por sector:** si un activo o un sector necesita un límite distinto (por ejemplo, "energía
-  máximo 30 %").
-- Los valores que aparecen al inicio son los del **caso docente de control**: sirven para reproducir el caso, no son la
-  decisión de ustedes.
+Estas cuatro casillas son **las reglas del inversionista**. La app no las calcula a partir de los precios: las define el
+equipo según su mandato. Los números que aparecen al abrir son los del **caso docente de control** (rf = 3 %, γ = 5,
+pesos entre 0 y 1): sirven para reproducir el ejercicio del profesor, no son una recomendación.
+
+**1. Tasa libre de riesgo (efectiva anual)** — ejemplo en pantalla: `0.0300` = **3 % al año**
+- Qué es: lo que gana un inversionista sin asumir riesgo de impago, en la **misma moneda** de los activos.
+- Dónde se busca: si los activos están en USD, la tasa de un bono del Tesoro de EE. UU. de corto plazo (pestaña
+  🏛️ Tasas soberanas o FRED); si trabajan en COP, un TES de corto plazo.
+- Cómo se escribe: en decimal y efectiva anual (4 % → `0.04`). La app la convierte a la frecuencia de los datos.
+- Para qué se usa: Sharpe, cartera tangente (máximo Sharpe), CAL y CAPM.
+
+**2. γ aversión al riesgo** — ejemplo en pantalla: `5.00`
+- Qué es: cuánto le molesta el riesgo al inversionista. Entra en la utilidad U = rendimiento − (γ/2)·varianza.
+- Cómo leerlo: γ bajo (≈ 2) = tolera riesgo y busca más rendimiento; γ alto (≈ 10) = muy conservador.
+- Para qué se usa: el **óptimo personal** (Markowitz), Black-Litterman y el rebalanceo.
+
+**3. Peso mínimo por activo** — ejemplo en pantalla: `0.00`
+- `0` = **no se permiten ventas en corto**: ningún activo puede tener peso negativo.
+- Un número negativo (por ejemplo `-0.20`) permite vender en corto hasta un 20 % en cada activo.
+- Un número positivo (por ejemplo `0.05`) obliga a tener al menos 5 % en **cada** activo.
+
+**4. Peso máximo por activo** — ejemplo en pantalla: `1.00`
+- `1` = un activo puede llegar a ser el 100 % de la cartera (sin límite de concentración).
+- `0.25` = ningún activo puede pesar más de 25 % (obliga a diversificar).
+- Mayor que `1` = permite apalancarse en ese activo.
+
+**Cuidado con combinaciones imposibles:** los pesos siempre suman 100 %. Si mínimo × número de activos > 1, o
+máximo × número de activos < 1, no existe ninguna cartera posible (por ejemplo, 3 activos con máximo 0,25 solo suman
+75 %) y la app lo avisa como **inviable**.
+
+**Sin límites de peso:** quita el mínimo y el máximo (cortos y apalancamiento ilimitados). Sirve para comparar con la
+teoría de Markowitz sin restricciones. Como el rendimiento puede crecer sin fin, aparece una casilla extra con el
+**rendimiento objetivo máximo** hasta donde se dibuja la frontera.
+
+**Cómo decidirlo en el equipo:** escriban primero el mandato (moneda, horizonte, cuánto pueden perder, si se permiten
+cortos y cuánto puede pesar un activo) y traduzcan cada regla a estas casillas.
 """)
         with st.expander("Cotas por activo y topes por sector (opcional)"):
             st.caption("Por defecto todos los activos usan el mínimo y máximo de arriba. Aquí se pueden cambiar por activo y "
                        "agrupar activos en sectores con un peso máximo por sector (decisión del equipo).")
+            _explain("¿Qué pongo en esta tabla?", """
+Esta tabla es **opcional**. Si no la tocan, todos los activos usan el peso mínimo y máximo de arriba y no hay topes
+por sector. Úsenla solo si el mandato tiene una regla especial para algún activo o grupo de activos.
+
+**Columnas**
+- **activo:** el nombre del activo (no se edita).
+- **mínimo:** el peso más bajo que puede tener **ese** activo. `0` = puede quedar fuera de la cartera; `0.10` = debe
+  tener al menos 10 %; negativo = se permite venderlo en corto hasta ese nivel.
+- **máximo:** el peso más alto que puede tener **ese** activo. `1` = sin límite; `0.30` = como mucho 30 %.
+- **sector:** una etiqueta libre para agrupar activos (por ejemplo `tecnología`, `energía`, `bonos`). Los activos con
+  la misma palabra quedan en el mismo grupo. Vacío = el activo no pertenece a ningún grupo.
+
+**Topes por sector:** en cuanto escriban al menos un sector, aparece debajo una segunda tabla con un **peso máximo** por
+sector. Ese número limita la **suma** de los pesos de todos los activos de ese sector. `1` = sin tope.
+
+**Ejemplo (solo para entender, no es una recomendación):** con 4 activos AAPL, MSFT, XOM y KO, si el mandato dice
+"ningún activo más de 40 % y tecnología como mucho 50 %":
+| activo | mínimo | máximo | sector |
+|---|---|---|---|
+| AAPL | 0 | 0.40 | tecnología |
+| MSFT | 0 | 0.40 | tecnología |
+| XOM | 0 | 0.40 | energía |
+| KO | 0 | 0.40 | consumo |
+
+y en la segunda tabla: tecnología = `0.50` (energía y consumo se dejan en `1`). Así AAPL + MSFT nunca superan 50 %.
+
+**Cómo comprobar que funcionó:** en la pestaña *Markowitz y fronteras*, los pesos de las carteras respetan estos
+límites. Si los límites no dejan sumar 100 % (por ejemplo, todos los máximos suman menos de 1), la app avisa que el
+problema es inviable.
+
+En el **caso docente de control** (activos A y B) no hay reglas especiales: se deja la tabla como está (0 y 1, sin
+sector).
+""")
             assets = list(lab.mu.index)
             per_asset = st.data_editor(
                 pd.DataFrame({"activo": assets, "mínimo": [lo] * len(assets), "máximo": [hi] * len(assets), "sector": [""] * len(assets)}),
