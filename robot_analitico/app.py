@@ -1064,8 +1064,8 @@ def render_sovereign_rates() -> None:
     """
     st.caption(
         "Fuente: FRED (Federal Reserve Economic Data, Banco de la Reserva "
-        "Federal de St. Louis). La lista de países se pide en vivo a FRED: solo "
-        "aparecen los que tienen la serie mensual de bonos del gobierno a 10 años."
+        "Federal de St. Louis). La lista de países se pide en vivo a FRED: aparecen "
+        "los que tienen la tasa a 10 años de la OCDE o, si no, la de bonos del gobierno del FMI."
     )
 
     try:
@@ -1095,8 +1095,10 @@ def render_sovereign_rates() -> None:
     with col_c:
         label = st.selectbox(
             f"País ({len(countries)} con dato en FRED)", labels, index=default, key="rates_country",
-            help="Solo aparecen los países que tienen en FRED la serie mensual de bonos del gobierno a 10 años "
-                 "(OCDE, código IRLTLT01…M156N). Si un país no está, FRED no publica esa serie para él.",
+            format_func=lambda x: f"{x} · datos hasta {by_label[x]['observation_end'][:4]}"
+            if _is_stale(by_label[x]["observation_end"]) else x,
+            help="Aparecen los países que tienen en FRED una serie de bonos del gobierno: la de la OCDE a 10 años "
+                 "o, si no hay, la del FMI (plazo según el país). Si un país no está, FRED no publica ninguna de las dos.",
         )
     with col_s:
         rates_start = st.date_input("Fecha inicial", value=pd.Timestamp("2015-01-01"), key="rates_start")
@@ -1115,18 +1117,32 @@ def render_sovereign_rates() -> None:
         return
 
     m1, m2, m3 = st.columns(3)
-    m1.metric(f"Tasa a 10 años · {label}", f"{series.iloc[-1]:.2f}%")
+    rate_name = "Tasa a 10 años" if info["source"] == "OCDE" else "Tasa de bonos del gobierno"
+    m1.metric(f"{rate_name} · {label}", f"{series.iloc[-1]:.2f}%")
     m2.metric("Fecha del último dato", str(series.index[-1].date()))
-    if len(series) > 12:
-        m3.metric("Cambio en 12 meses", f"{series.iloc[-1] - series.iloc[-13]:+.2f} p.p.")
+    year_ago = series[series.index <= series.index[-1] - pd.DateOffset(years=1)]
+    if not year_ago.empty:
+        m3.metric("Cambio en 12 meses", f"{series.iloc[-1] - year_ago.iloc[-1]:+.2f} p.p.")
     st.line_chart(series.rename(f"{label} (%)"), height=280)
-    st.caption(f"Serie FRED **{info['id']}** — {info['title']}. Mensual, en % anual.")
+    st.caption(f"Fuente: {info['source']} vía FRED, {info['detail']}; serie {info['frequency']} en % anual. "
+               f"Código **{info['id']}** — {info['title']}.")
+    if _is_stale(info["observation_end"]):
+        st.warning(f"El último dato de {label} en FRED es de {info['observation_end'][:7]}: es una referencia histórica, "
+                   "no la tasa actual.")
     with st.expander("Ver datos en tabla"):
         st.dataframe(series.rename("tasa_%"))
 
 
+def _is_stale(observation_end: str, years: int = 2) -> bool:
+    """True si el último dato de la serie tiene más de `years` años."""
+    try:
+        return pd.Timestamp(observation_end) < pd.Timestamp.today() - pd.DateOffset(years=years)
+    except (ValueError, TypeError):
+        return True
+
+
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
-def _fred_countries(api_key: str) -> "list[dict]":
+def _fred_countries(api_key: str, version: int = 2) -> "list[dict]":  # version: invalida la caché vieja
     return list_long_term_yield_countries(api_key)
 
 
@@ -1994,7 +2010,7 @@ def _page_title(title: str, subtitle: str) -> None:
 HOME_SECTIONS = [
     ("Preselección de activos",
      "Descarga un activo, mira su historia y su pronóstico, y compara varios para preseleccionar los que no están dominados."),
-    ("Tasas soberanas", "Tasas de bonos a 10 años por país (FRED) como referencia del contexto macro."),
+    ("Tasas soberanas", "Tasas de bonos del gobierno por país (FRED: OCDE a 10 años y FMI) como referencia del contexto macro."),
     (LAB_TITLE,
      "Arma carteras simuladas: Markowitz, Black-Litterman, rebalanceo, backtest, beta/CAPM y valoración."),
     ("Noticias e hitos", "En la barra lateral: noticias verificadas y movimientos históricos del activo."),
