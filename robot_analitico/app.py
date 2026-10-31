@@ -1097,15 +1097,21 @@ def render_sovereign_rates() -> None:
             f"País ({len(countries)} con dato en FRED)", labels, index=default, key="rates_country",
             format_func=lambda x: f"{x} · datos hasta {by_label[x]['observation_end'][:4]}"
             if _is_stale(by_label[x]["observation_end"]) else x,
-            help="Aparecen los países que tienen en FRED una serie de bonos del gobierno: la de la OCDE a 10 años "
-                 "o, si no hay, la del FMI (plazo según el país). Si un país no está, FRED no publica ninguna de las dos.",
+            help="Países con una serie de bonos del gobierno en FRED: la de la OCDE a 10 años o, si no hay, la del FMI "
+                 "u otra serie de bonos del país. Si falta alguno, búscalo por nombre en el desplegable de abajo.",
         )
     with col_s:
         rates_start = st.date_input("Fecha inicial", value=pd.Timestamp("2015-01-01"), key="rates_start")
     with col_e:
         rates_end = st.date_input("Fecha final", value=pd.Timestamp.today(), key="rates_end")
 
-    info = by_label[label]
+    _render_rate_series(fred_api_key, by_label[label], label, rates_start, rates_end)
+    with st.expander("¿No está el país que buscas? Búscalo por nombre en FRED"):
+        _render_rates_free_search(fred_api_key)
+
+
+def _render_rate_series(fred_api_key: str, info: dict, label: str, rates_start, rates_end) -> None:
+    """Tasa actual, cambio en 12 meses, gráfica y tabla de la serie elegida."""
     with st.spinner(f"Descargando de FRED la tasa de {label}..."):
         try:
             series = _fred_series(fred_api_key, info["id"], rates_start, rates_end)
@@ -1142,7 +1148,7 @@ def _is_stale(observation_end: str, years: int = 2) -> bool:
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
-def _fred_countries(api_key: str, version: int = 2) -> "list[dict]":  # version: invalida la caché vieja
+def _fred_countries(api_key: str, version: int = 3) -> "list[dict]":  # version: invalida la caché vieja
     return list_long_term_yield_countries(api_key)
 
 
