@@ -89,7 +89,7 @@ def test_duplicate_event_gives_single_decision_p2_27(control):
     first = reb.on_event(event)
     second = reb.on_event(event)
     assert first.action == ACTION_REBALANCE and second is None
-    assert len(reb.log) == 1
+    assert [d.action for d in reb.log] == [ACTION_REBALANCE, "duplicado"]  # el duplicado queda registrado, sin decisión
 
 
 def test_abstentions_are_recorded_p2_28(control):
