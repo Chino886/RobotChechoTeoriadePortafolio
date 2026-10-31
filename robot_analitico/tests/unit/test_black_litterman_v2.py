@@ -145,3 +145,11 @@ def test_mean_uncertainty_separated_from_predictive_risk_p2_23(control):
     assert np.linalg.eigvalsh(data["tau"] * sigma.to_numpy() - res.M.to_numpy()).min() > -1e-15
     with pytest.raises(ValueError):
         implied_prior(sigma, w_ref, delta=-1.0)  # delta negativa no se invierte de signo en silencio
+
+
+def test_view_not_yet_known_is_excluded(control):
+    data, assets, sigma, _ = control
+    future = View("VF", {"A": 1.0}, 0.03, omega=0.0002, known_at=date(2026, 12, 1))
+    vs = build_view_set([future], assets, sigma, data["tau"], as_of=date(2026, 10, 31))
+    assert vs.used == [] and "Aún no conocida" in vs.excluded["VF"]
+    assert build_view_set([future], assets, sigma, data["tau"], as_of=date(2026, 12, 1)).used == ["VF"]

@@ -42,6 +42,7 @@ class View:
     expires_at: Optional[date] = None
     author: str = ""
     thesis: str = ""
+    known_at: Optional[date] = None  # desde cuándo se conoce: antes de esa fecha no se usa (sin look-ahead)
 
 
 def absolute_total_to_excess(q_total: float, rf: float, p_row_sum: float = 1.0) -> float:
@@ -104,6 +105,9 @@ def build_view_set(views: "list[View]", asset_order: "list[str]", sigma: pd.Data
             continue
         if as_of is not None and v.expires_at is not None and v.expires_at < as_of:
             excluded[v.view_id] = f"Vencida el {v.expires_at}."
+            continue
+        if as_of is not None and v.known_at is not None and v.known_at > as_of:
+            excluded[v.view_id] = f"Aún no conocida (se conoce el {v.known_at})."
             continue
         if v.confidence is not None and v.confidence == 0:
             excluded[v.view_id] = "Confianza 0: la view se excluye (no equivale a certeza)."

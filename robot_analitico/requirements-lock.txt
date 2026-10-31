@@ -1,5 +1,5 @@
-# Versiones exactas con las que se ejecutó la suite completa (105 pruebas en verde)
-# el 2026-10-31, con Python 3.13.16. Guía v2, sección 13: «dependencias fijadas tras probar».
+# Versiones exactas con las que se ejecutó la suite completa
+# con Python 3.13.16. Guía v2, sección 13: «dependencias fijadas tras probar».
 #
 # requirements.txt conserva rangos (lo usa Streamlit Cloud). Para reproducir el
 # entorno probado:
@@ -17,3 +17,5 @@ requests==2.34.2
 plotly==7.1.0
 pytest==9.1.1
 pytest-cov==7.1.0
+# Solo para pruebas: contraste de Ledoit-Wolf con la implementación de referencia
+scikit-learn==1.9.1

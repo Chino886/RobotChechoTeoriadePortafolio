@@ -9,10 +9,11 @@ histórico rendimiento-riesgo de la comparación de N activos (Fase 8).
 import pandas as pd
 import plotly.graph_objects as go
 
-# Paleta fintech (tema oscuro, alineada con .streamlit/config.toml).
-NEON_GREEN = "#00FFA3"  # líneas principales
+# Paleta (tema oscuro, alineada con .streamlit/config.toml): dorado suave en vez de
+# verde neón para que se lea bien al proyectar sobre fondo oscuro.
+ACCENT_GOLD = "#EBC35E"  # líneas principales
 ELECTRIC_BLUE = "#2DE1FC"  # bandas, áreas y series secundarias
-STAR_GOLD = "#FFD700"  # elección marcada por el usuario en el mapa
+STAR_WHITE = "#F5F5F5"  # elección marcada por el usuario en el mapa; también la CAL
 DARK_LAYOUT = dict(
     template="plotly_dark",
     paper_bgcolor="#0E1117",
@@ -24,7 +25,7 @@ DARK_LAYOUT = dict(
 def price_chart(prices, ticker: str, currency: str, frequency: str, source: str) -> go.Figure:
     fig = go.Figure()
     fig.add_trace(
-        go.Scatter(x=prices.index, y=prices.values, mode="lines", name=ticker, line=dict(color=NEON_GREEN))
+        go.Scatter(x=prices.index, y=prices.values, mode="lines", name=ticker, line=dict(color=ACCENT_GOLD))
     )
     fig.update_layout(
         title=f"Precio ajustado - {ticker} ({frequency}, fuente: {source})",
@@ -39,7 +40,7 @@ def price_chart(prices, ticker: str, currency: str, frequency: str, source: str)
 def return_chart(returns, ticker: str, frequency: str) -> go.Figure:
     fig = go.Figure()
     fig.add_trace(
-        go.Scatter(x=returns.index, y=returns.values, mode="lines", name=ticker, line=dict(color=NEON_GREEN))
+        go.Scatter(x=returns.index, y=returns.values, mode="lines", name=ticker, line=dict(color=ACCENT_GOLD))
     )
     fig.update_layout(
         title=f"Rendimiento logarítmico - {ticker} ({frequency})",
@@ -68,7 +69,7 @@ def forecast_chart(prices, steps, ticker: str, frequency: str, history_window: i
     fig = go.Figure()
     hist = prices.tail(history_window)
     fig.add_trace(
-        go.Scatter(x=hist.index, y=hist.values, mode="lines", name="Histórico", line=dict(color=NEON_GREEN))
+        go.Scatter(x=hist.index, y=hist.values, mode="lines", name="Histórico", line=dict(color=ACCENT_GOLD))
     )
 
     future_dates = _future_dates(hist.index[-1], frequency, len(steps))
@@ -88,7 +89,7 @@ def forecast_chart(prices, steps, ticker: str, frequency: str, history_window: i
     fig.add_trace(
         go.Scatter(
             x=future_dates, y=medians, mode="lines", name="Mediana pronosticada",
-            line=dict(dash="dash", color=NEON_GREEN),
+            line=dict(dash="dash", color=ACCENT_GOLD),
         )
     )
     fig.update_layout(
@@ -137,7 +138,7 @@ def risk_return_map(summaries, non_dominated, starred_ticker: "str | None" = Non
                 text=[s.ticker for s in frontier],
                 textposition="top center",
                 name="No dominado",
-                marker=dict(size=13, color=NEON_GREEN, symbol="diamond"),
+                marker=dict(size=13, color=ACCENT_GOLD, symbol="diamond"),
             )
         )
     starred = [s for s in summaries if starred_ticker is not None and s.ticker == starred_ticker]
@@ -150,7 +151,7 @@ def risk_return_map(summaries, non_dominated, starred_ticker: "str | None" = Non
                 text=[starred[0].ticker],
                 textposition="bottom center",
                 name="Tu elección",
-                marker=dict(size=18, symbol="star", color=STAR_GOLD),
+                marker=dict(size=18, symbol="star", color=STAR_WHITE),
             )
         )
     fig.update_layout(

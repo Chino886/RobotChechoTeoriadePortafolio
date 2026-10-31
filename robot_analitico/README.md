@@ -89,15 +89,17 @@ guía a `tests/fixtures/` (mismos nombres exactos):
 - `Resultados_esperados_20_activos_TBS_EIA.csv`
 - `Anexo_matriz_casos_prueba_robot_analitico_TBS_EIA_FINAL.csv`
 
-Las pruebas de la v2 (`tests/unit/test_*_v2.py`, 51 pruebas sin red) usan
-los datos del paquete docente en `paquete_v2/data/` y cubren P2-5 a P2-17,
-P2-19 a P2-35 de la guía v2: controles analíticos de dos activos,
-Black-Litterman, rebalanceo, backtest walk-forward sin look-ahead, caso
-Alimentos del Norte, calidad del dato, relojes y exportación trazable. Una de
-ellas contrasta Ledoit-Wolf con scikit-learn y se omite si esa librería no
-está instalada (no es dependencia del proyecto). La conexión real a Yahoo
-(P2-3, P2-4) y la reproducción/defensa (P2-36) se verifican aparte: un mock no
-acredita una conexión real.
+Las pruebas de la v2 (`tests/unit/test_*_v2.py`, 83 pruebas sin red) usan
+los datos del paquete docente en `paquete_v2/data/` y cubren P2-4 a P2-35 de
+la guía v2: controles analíticos de dos activos, precisión del optimizador
+contra una referencia exacta de conjunto activo, cortos, Black-Litterman,
+rebalanceo con caja mínima y reestimación, backtest walk-forward sin
+look-ahead, caso Alimentos del Norte (proyección, covenant, FCFE/FCFF,
+iteración D/E), calidad del dato, relojes y exportación trazable. Una de
+ellas contrasta Ledoit-Wolf con scikit-learn (incluida en
+`requirements-lock.txt`). La conexión real a Yahoo (P2-3) y la
+reproducción/defensa (P2-36) se verifican aparte: un mock no acredita una
+conexión real.
 
 Para reproducir exactamente el entorno con el que se probó:
 `pip install -r requirements-lock.txt` (versiones fijadas tras probar).
@@ -127,6 +129,7 @@ src/portfolio.py # v2: retornos simples de cartera, covarianza/correlación, rie
 src/black_litterman.py # v2: prior, views, posterior y matriz predictiva
 src/rebalance.py # v2: libro de posiciones, deriva, costos y política de rebalanceo simulado
 src/capm.py # v2: beta OLS, Hamada, Ke, WACC, FCFF y valor terminal
+src/valuation.py # v2: proyección del caso Alimentos del Norte, covenant, meta presupuestal, FCFE/FCFF, iteración D/E, escenarios
 src/market.py # v2: cotización en línea (barras de 1 minuto) con antigüedad del dato
 src/backtest.py # v2: evaluación walk-forward de estrategias (sin look-ahead)
 src/stress.py # v2: escenarios de estrés, escenario inverso, VaR y concentración

@@ -166,7 +166,7 @@ def test_complete_bars_and_three_clocks_p2_12_p2_24():
     p = complete.iloc[-1]
     assert reb.on_event(MarketEvent("cierre-2026-10-29", after, p)) is not None
     assert reb.on_event(MarketEvent("cierre-2026-10-29", after + timedelta(minutes=1), p)) is None  # duplicado
-    assert len(reb.log) == 1
+    assert [d.action for d in reb.log][-1] == "duplicado" and sum(d.action != "duplicado" for d in reb.log) == 1
 
 
 # --- Moneda ----------------------------------------------------------------------
