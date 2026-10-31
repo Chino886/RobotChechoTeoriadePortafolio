@@ -3,6 +3,7 @@ Punto de entrada de la aplicación.
 Robot analítico para la preselección de activos - Teoría Moderna de
 Portafolios, Tech Business School - Universidad EIA.
 """
+import base64
 import json
 from pathlib import Path
 
@@ -90,10 +91,10 @@ VERSION = "0.1.0"
 LAST_UPDATE = "2026-09-14"
 
 EXECUTION_POLICY_SUMMARY = (
-    "Piloto académico restringido. Posición larga únicamente. Rendimiento "
-    "logarítmico exclusivo. El sistema puede emitir 'no señal'. No calcula "
-    "portafolios, pesos, covarianzas ni frontera eficiente. Ver la vista "
-    "Metodología para la política de ejecución completa."
+    "Piloto académico restringido. Preselección (v1): posición larga únicamente, "
+    "rendimiento logarítmico exclusivo, puede emitir 'no señal' y no calcula "
+    "portafolios, pesos, covarianzas ni frontera eficiente. El laboratorio v2 sí "
+    "arma carteras, solo como simulación académica: no envía órdenes."
 )
 
 # Descripciones cortas de cada prueba de diagnóstico (sección 5.4), mostradas
@@ -169,6 +170,92 @@ DISCLAIMER_TEXT = (
 )
 
 
+INSTITUTION = "Tech Business School – Universidad EIA"
+# Título del laboratorio v2 en el menú superior y en su página (el equipo lo va a renombrar).
+LAB_TITLE = "Laboratorio de portafolios v2"
+
+def _logo_b64() -> str:
+    try:
+        return base64.b64encode(LOGO_PATH.read_bytes()).decode()
+    except OSError:
+        return ""
+
+
+# Estilo del menú superior (pestañas principales) y de las tarjetas de Inicio.
+# Como el resto de la CSS, apunta a clases internas de Streamlit (st-key-*,
+# data-testid, data-baseweb) y puede requerir ajuste si cambia la versión.
+NAV_CSS = """
+<style>
+/* Menú superior: barra fija arriba con las pestañas principales (solo las
+   del contenedor dpst_nav; las pestañas internas de cada sección no cambian). */
+.st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] {
+    position: sticky; top: 3.6rem; z-index: 99;
+    background: rgba(11, 18, 32, 0.92); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 14px;
+    padding: 0.35rem 0.5rem; gap: 0.35rem; margin-bottom: 0.8rem;
+    display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap;
+}
+/* Marca a la izquierda de la barra (logo + DPST), las secciones a la derecha. */
+.st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"]::before {
+    content: "__BRAND__"; margin-right: auto; padding: 0.3rem 0.6rem 0.3rem 2.6rem;
+    font-size: 1.3rem; font-weight: 800; letter-spacing: -0.01em; color: #E6E6E6;
+    background: url("data:image/svg+xml;base64,__LOGO_B64__") no-repeat 0.4rem center / 1.9rem;
+}
+.st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"] {
+    padding: 0.55rem 1.1rem; border-radius: 10px; height: auto; transition: background 0.15s;
+}
+.st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"]:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+.st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"] p {
+    font-size: 1.02rem; font-weight: 600; color: #B8C0D0;
+}
+.st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"][aria-selected="true"] {
+    background: rgba(0, 255, 163, 0.10);
+}
+.st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"][aria-selected="true"] p {
+    color: #00FFA3;
+}
+.st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"] .react-aria-SelectionIndicator {
+    display: none;
+}
+
+@media (max-width: 640px) {
+    .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] { position: static; }
+}
+
+/* Encabezado de cada página */
+.dpst-page-title { margin: 0.4rem 0 0; font-size: 1.7rem; font-weight: 800; letter-spacing: -0.02em; }
+.dpst-page-sub { color: #8B93A7; margin: 0.15rem 0 0.4rem; }
+
+/* Inicio */
+.dpst-hero {
+    padding: 2rem 2rem 1.6rem; border-radius: 18px; border: 1px solid rgba(255,255,255,0.07);
+    background: radial-gradient(1200px 300px at 0% 0%, rgba(0,255,163,0.14), transparent 60%),
+                radial-gradient(900px 300px at 100% 0%, rgba(45,225,252,0.12), transparent 60%), #0F1624;
+}
+.dpst-hero h1 { margin: 0.4rem 0 0.2rem; font-size: 2.6rem; }
+.dpst-hero .sub { font-size: 1.1rem; color: #C9D1E0; }
+.dpst-hero .meta { color: #8B93A7; font-size: 0.9rem; margin-top: 0.6rem; }
+.dpst-pill {
+    display: inline-block; padding: 0.2rem 0.7rem; border-radius: 999px; font-size: 0.78rem; font-weight: 700;
+    color: #0B1220; background: #00FFA3; letter-spacing: 0.03em;
+}
+.dpst-notice {
+    margin-top: 0.6rem; padding: 1.1rem 1.3rem; border-radius: 14px; border: 1px solid rgba(255, 196, 0, 0.35);
+    background: rgba(255, 196, 0, 0.07); color: #E6E6E6;
+}
+.dpst-notice b { color: #FFC400; }
+.dpst-card {
+    min-height: 200px; padding: 1rem 1.1rem; border-radius: 14px; border: 1px solid rgba(255,255,255,0.07);
+    background: #121A2A;
+}
+.dpst-card .ico { font-size: 1.5rem; }
+.dpst-card .t { font-weight: 700; margin: 0.3rem 0 0.25rem; color: #E6E6E6; }
+.dpst-card .d { color: #9AA3B5; font-size: 0.9rem; line-height: 1.4; }
+</style>
+""".replace("__LOGO_B64__", _logo_b64()).replace("__BRAND__", BRAND_NAME)
+
 def _logo_svg(size: int = 44, gradient_id: str = "logoGrad") -> str:
     """
     SVG del logo (static/logo.svg) con tamaño y id de gradiente ajustables:
@@ -228,7 +315,7 @@ def render_header() -> None:
             display: none;
         }
         [data-testid="stMainBlockContainer"] {
-            padding-top: 2.5rem;
+            padding-top: 3.5rem;
             padding-bottom: 3rem;
         }
         [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {
@@ -238,17 +325,7 @@ def render_header() -> None:
         """,
         unsafe_allow_html=True,
     )
-    svg_content = _logo_svg()
-    st.markdown(
-        f'<div style="display:flex; align-items:center; gap:12px;">{svg_content}'
-        f'<h1 style="margin:0;">{BRAND_NAME}</h1></div>',
-        unsafe_allow_html=True,
-    )
-    st.caption(f"{SYSTEM_NAME} · {TEAM_NAME} · versión {VERSION} · última actualización {LAST_UPDATE}")
-    with st.expander("Equipo e identidad"):
-        for member in MEMBERS:
-            st.write(f"- {member}")
-        st.info(EXECUTION_POLICY_SUMMARY)
+    st.markdown(NAV_CSS, unsafe_allow_html=True)
 
 
 def render_sidebar_style() -> None:
@@ -287,11 +364,7 @@ def render_sidebar_style() -> None:
         """,
         unsafe_allow_html=True,
     )
-    st.sidebar.markdown(
-        f'<div class="brand-sidebar-card">{_logo_svg(28, "logoGradSidebar")}'
-        f"<span>{BRAND_NAME}</span></div>",
-        unsafe_allow_html=True,
-    )
+    # La marca ya está en el menú superior; el sidebar queda para sesión y noticias.
 
 
 def render_disclaimer_gate(user_name: str, user_email: str) -> None:
@@ -352,8 +425,7 @@ def render_historical_analysis() -> None:
     if result is None or not result.ok:
         return
 
-    st.divider()
-    st.subheader(f"Análisis histórico de {result.ticker} (RF-09 a RF-12)")
+    st.caption(f"{result.ticker} · requisitos RF-09 a RF-12")
 
     prices = result.prices["adjusted_close"]
     returns = log_returns(prices)
@@ -504,8 +576,7 @@ def render_forecast() -> None:
         )
         return
 
-    st.divider()
-    st.subheader(f"Pronóstico de {result.ticker} (RF-13 a RF-15)")
+    st.caption(f"{result.ticker} · requisitos RF-13 a RF-15")
     st.caption(
         "Piloto académico: los modelos son homocedásticos por alcance pedagógico. "
         "Si los diagnósticos de la pestaña anterior muestran volatilidad variable o "
@@ -727,8 +798,7 @@ def render_comparison() -> None:
     pesos, covarianzas, correlaciones conjuntas ni frontera eficiente: es una
     preselección de activos individuales.
     """
-    st.divider()
-    st.subheader("Comparación de activos (RF-19 a RF-22)")
+    st.caption("Requisitos RF-19 a RF-22")
     st.caption(
         "Vista independiente del análisis de un solo activo. Acepta un mínimo "
         f"simultáneo de {MIN_COMPARISON_ASSETS} activos válidos. No calcula pesos, "
@@ -984,8 +1054,6 @@ def render_sovereign_rates() -> None:
     activos de arriba: no entra en el mapa de dominancia ni en la
     preselección (RF-19 a RF-22), es solo información de contexto.
     """
-    st.divider()
-    st.subheader("Tasas de bonos soberanos por país (referencia, vía FRED)")
     st.caption(
         "Fuente: FRED (Federal Reserve Economic Data, Banco de la Reserva "
         "Federal de St. Louis). Se busca en vivo la serie real que corresponde "
@@ -1066,8 +1134,6 @@ def render_portfolio_forecast() -> None:
     activo, y la señal de entrada/salida con costos (reutilizando las mismas
     fórmulas de las pestañas de Pronóstico y Riesgo de arriba).
     """
-    st.divider()
-    st.subheader("Pronóstico por canasta de inversión (monto en USD por activo)")
     st.caption(
         "Cada activo se pronostica por separado con su propio historial — no es "
         "un portafolio combinado (no hay correlaciones conjuntas ni frontera "
@@ -1840,54 +1906,158 @@ def main() -> None:
     render_news_sidebar()
     render_news_panel()
 
-    st.success(f"Sesión iniciada como {user_name} ({user_email})")
+    # Menú superior. Se usan pestañas (y no páginas de st.navigation) para que
+    # los datos escritos en una sección no se borren al pasar a otra.
+    with st.container(key="dpst_nav"):
+        tab_home, tab_pre, tab_rates, tab_lab = st.tabs(
+            ["🏠 Inicio", "🔎 Preselección de activos", "🏛️ Tasas soberanas", f"🧪 {LAB_TITLE}"]
+        )
+        with tab_home:
+            render_home(user_name, user_email)
+        with tab_pre:
+            render_preselection_page()
+        with tab_rates:
+            _page_title("🏛️", "Tasas de bonos soberanos",
+                        "Referencia macroeconómica por país (FRED). No entra en la preselección ni en el laboratorio.")
+            render_sovereign_rates()
+        with tab_lab:
+            _page_title("🧪", LAB_TITLE,
+                        "Carteras simuladas con los modelos del avance 2.")
+            render_portfolio_lab()
 
-    st.divider()
-    st.subheader("Datos: probar un activo (RF-05 a RF-07)")
 
-    col1, col2, col3 = st.columns(3)
+def _page_title(icon: str, title: str, subtitle: str) -> None:
+    st.markdown(
+        f'<div class="dpst-page-title">{icon} {title}</div><div class="dpst-page-sub">{subtitle}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+HOME_SECTIONS = [
+    ("🔎", "Preselección de activos",
+     "Descarga un activo, mira su historia y su pronóstico, y compara varios para preseleccionar los que no están dominados."),
+    ("🏛️", "Tasas soberanas", "Tasas de bonos a 10 años por país (FRED) como referencia del contexto macro."),
+    ("🧪", LAB_TITLE,
+     "Arma carteras simuladas: Markowitz, Black-Litterman, rebalanceo, backtest, beta/CAPM y valoración."),
+    ("📰", "Noticias e hitos", "En la barra lateral: noticias verificadas y movimientos históricos del activo."),
+]
+
+
+def render_home(user_name: str, user_email: str) -> None:
+    """Portada: nombre del bot, alcance (solo preselección académica) y mapa de secciones."""
+    st.markdown(
+        f'''<div class="dpst-hero">
+        <span class="dpst-pill">PRESELECCIÓN ACADÉMICA</span>
+        <div style="display:flex; align-items:center; gap:14px;">{_logo_svg(56, "logoGradHero")}<h1>{BRAND_NAME}</h1></div>
+        <div class="sub">{SYSTEM_NAME}</div>
+        <div class="meta">{TEAM_NAME} · {INSTITUTION} · Teoría Moderna de Portafolios · versión {VERSION}</div>
+        </div>''',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="dpst-notice"><b>⚠️ Este bot no selecciona activos para invertir en la vida real.</b> '
+        "Es una herramienta de <b>preselección</b> con fines académicos: ayuda a estudiar activos y carteras "
+        "con datos históricos y modelos del curso, pero no es asesoría financiera ni recomendación de inversión, "
+        "no ejecuta operaciones y no garantiza resultados.</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("#### Qué encuentras en cada sección")
+    cols = st.columns(len(HOME_SECTIONS))
+    for col, (ico, title, desc) in zip(cols, HOME_SECTIONS):
+        col.markdown(
+            f'<div class="dpst-card"><div class="ico">{ico}</div><div class="t">{title}</div>'
+            f'<div class="d">{desc}</div></div>',
+            unsafe_allow_html=True,
+        )
+    with st.expander("📜 Disclaimer académico completo"):
+        st.write(DISCLAIMER_TEXT)
+    with st.expander("👥 Equipo y política de uso"):
+        for member in MEMBERS:
+            st.write(f"- {member}")
+        st.info(EXECUTION_POLICY_SUMMARY)
+    st.caption(
+        f"Sesión iniciada como {user_name} ({user_email}) · última actualización {LAST_UPDATE}"
+    )
+    if not DEV_MODE and st.button("Cerrar sesión"):
+        st.logout()
+
+
+def _need_asset() -> bool:
+    """True si ya hay un activo descargado; si no, deja un aviso dentro de la sección."""
+    result = st.session_state.get("asset_result")
+    if result is None or not result.ok:
+        st.info("Primero descarga un activo en **📥 Datos del activo a probar**.")
+        return False
+    return True
+
+
+def render_asset_data() -> None:
+    """Datos: probar un activo (RF-05 a RF-07)."""
+    st.caption("Requisitos RF-05 a RF-07")
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 1.4])
     with col1:
         ticker_input = st.text_input("Ticker", value="AAPL")
     with col2:
         start_date = st.date_input("Fecha inicial", value=pd.Timestamp("2023-01-01"))
     with col3:
         end_date = st.date_input("Fecha final", value=pd.Timestamp.today())
+    with col4:
+        frequency = st.selectbox("Frecuencia (Semanal recomendada: menos ruido que Diaria)",
+                                 list(FREQUENCY_RULES.keys()))
 
-    frequency = st.selectbox("Frecuencia (Semanal recomendada: menos ruido que Diaria)", list(FREQUENCY_RULES.keys()))
-
-    if st.button("Descargar y limpiar"):
+    if st.button("Descargar y limpiar", type="primary"):
         with st.spinner("Descargando..."):
             result = fetch_asset_data(ticker_input, start_date, end_date)
             if result.ok:
                 result.prices = resample_prices(result.prices, frequency)
-
         if result.ok:
             st.session_state["asset_result"] = result
             st.session_state["asset_frequency"] = frequency
-            st.success(
-                f"{result.ticker}: {len(result.prices)} observaciones · "
-                f"fuente: {result.source} · moneda: {result.currency or 'N/D'} · "
-                f"zona horaria: {result.timezone or 'N/D'} · "
-                f"último dato: {result.prices.index.max().date()}"
-            )
-            if result.dropped_rows:
-                st.warning(
-                    f"Se descartaron {result.dropped_rows} filas inválidas "
-                    "(faltantes o precios no positivos)."
-                )
-            st.dataframe(result.prices.tail(20))
         else:
             st.session_state.pop("asset_result", None)
             st.error(f"{result.ticker}: {result.error}")
 
-    render_historical_analysis()
-    render_forecast()
-    render_comparison()
-    render_portfolio_forecast()
-    render_sovereign_rates()
-    render_portfolio_lab()
+    # El resumen queda visible aunque se abran o cierren otras secciones.
+    result = st.session_state.get("asset_result")
+    if result is not None and result.ok:
+        st.success(
+            f"{result.ticker}: {len(result.prices)} observaciones · "
+            f"fuente: {result.source} · moneda: {result.currency or 'N/D'} · "
+            f"zona horaria: {result.timezone or 'N/D'} · "
+            f"último dato: {result.prices.index.max().date()} · "
+            f"frecuencia: {st.session_state.get('asset_frequency')}"
+        )
+        if result.dropped_rows:
+            st.warning(
+                f"Se descartaron {result.dropped_rows} filas inválidas "
+                "(faltantes o precios no positivos)."
+            )
+        with st.expander("Ver últimos 20 datos"):
+            st.dataframe(result.prices.tail(20))
 
-    if not DEV_MODE and st.button("Cerrar sesión"):
-        st.logout()
+
+def render_preselection_page() -> None:
+    """
+    Preselección (v1): cada bloque es desplegable para no tener que bajar
+    tanto; se abre solo lo que se esté mostrando.
+    """
+    _page_title("🔎", "Preselección de activos",
+                "Abre solo la sección que vas a mostrar. Los datos se conservan al cerrar y abrir.")
+    with st.expander("📥 Datos del activo a probar", expanded=True):
+        render_asset_data()
+    result = st.session_state.get("asset_result")  # leído después de una posible descarga
+    ticker = f" · {result.ticker}" if result is not None and result.ok else ""
+    with st.expander(f"📊 Análisis histórico{ticker}"):
+        if _need_asset():
+            render_historical_analysis()
+    with st.expander(f"🔮 Pronóstico{ticker}"):
+        if _need_asset():
+            render_forecast()
+    with st.expander("⚖️ Comparación y preselección de activos"):
+        render_comparison()
+    with st.expander("🧺 Pronóstico por canasta de inversión (USD por activo)"):
+        render_portfolio_forecast()
+
+
 if __name__ == "__main__":
     main()

@@ -1268,8 +1268,6 @@ def _tab_export(lab: LabData, rf_ea, gamma, bounds, groups, results):
 # ---------------------------------------------------------------------------
 
 def render_portfolio_lab() -> None:
-    st.divider()
-    st.subheader("Laboratorio de portafolios (v2)")
     st.caption(
         "Asignación de capital: riesgo conjunto, Markowitz, Black-Litterman, rebalanceo simulado, beta/CAPM y "
         "valoración. Simulación académica: no envía órdenes ni constituye recomendación de inversión."
