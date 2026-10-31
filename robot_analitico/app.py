@@ -39,7 +39,7 @@ from src.comparison import (
     processed_prices_export,
 )
 from src.data import FREQUENCY_RULES, fetch_asset_data, fetch_fx_to_usd, fetch_many, resample_prices
-from src.rates import fetch_bond_series, search_bond_series
+from src.rates import fetch_bond_series, list_long_term_yield_countries, search_bond_series
 from laboratorio_v2 import render_portfolio_lab
 from src.news_links import verify_items
 from src.forecasting import (
@@ -1064,8 +1064,8 @@ def render_sovereign_rates() -> None:
     """
     st.caption(
         "Fuente: FRED (Federal Reserve Economic Data, Banco de la Reserva "
-        "Federal de St. Louis). Se busca en vivo la serie real que corresponde "
-        "al país indicado — nunca se asume un código de serie de antemano."
+        "Federal de St. Louis). La lista de países se pide en vivo a FRED: solo "
+        "aparecen los que tienen la serie mensual de bonos del gobierno a 10 años."
     )
 
     try:
@@ -1079,6 +1079,64 @@ def render_sovereign_rates() -> None:
         )
         return
 
+    try:
+        countries = _fred_countries(fred_api_key)
+    except Exception as exc:
+        countries = []
+        st.error(f"No se pudo obtener de FRED la lista de países: {exc}")
+    if not countries:
+        _render_rates_free_search(fred_api_key)
+        return
+
+    labels = [c["label"] for c in countries]
+    by_label = {c["label"]: c for c in countries}
+    default = labels.index("Colombia") if "Colombia" in labels else 0
+    col_c, col_s, col_e = st.columns([2, 1, 1])
+    with col_c:
+        label = st.selectbox(
+            f"País ({len(countries)} con dato en FRED)", labels, index=default, key="rates_country",
+            help="Solo aparecen los países que tienen en FRED la serie mensual de bonos del gobierno a 10 años "
+                 "(OCDE, código IRLTLT01…M156N). Si un país no está, FRED no publica esa serie para él.",
+        )
+    with col_s:
+        rates_start = st.date_input("Fecha inicial", value=pd.Timestamp("2015-01-01"), key="rates_start")
+    with col_e:
+        rates_end = st.date_input("Fecha final", value=pd.Timestamp.today(), key="rates_end")
+
+    info = by_label[label]
+    with st.spinner(f"Descargando de FRED la tasa de {label}..."):
+        try:
+            series = _fred_series(fred_api_key, info["id"], rates_start, rates_end)
+        except Exception as exc:
+            st.error(f"Error al descargar la serie: {exc}")
+            return
+    if series.empty:
+        st.warning(f"FRED no tiene observaciones de {label} entre esas fechas (último dato: {info['observation_end']}).")
+        return
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric(f"Tasa a 10 años · {label}", f"{series.iloc[-1]:.2f}%")
+    m2.metric("Fecha del último dato", str(series.index[-1].date()))
+    if len(series) > 12:
+        m3.metric("Cambio en 12 meses", f"{series.iloc[-1] - series.iloc[-13]:+.2f} p.p.")
+    st.line_chart(series.rename(f"{label} (%)"), height=280)
+    st.caption(f"Serie FRED **{info['id']}** — {info['title']}. Mensual, en % anual.")
+    with st.expander("Ver datos en tabla"):
+        st.dataframe(series.rename("tasa_%"))
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def _fred_countries(api_key: str) -> "list[dict]":
+    return list_long_term_yield_countries(api_key)
+
+
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def _fred_series(api_key: str, series_id: str, start, end) -> pd.Series:
+    return fetch_bond_series(api_key, series_id, start, end)
+
+
+def _render_rates_free_search(fred_api_key: str) -> None:
+    """Respaldo si FRED no entrega la lista de países: búsqueda por texto como antes."""
     country_query = st.text_input(
         "País (en inglés suele funcionar mejor, ej. 'Colombia', 'United States', 'Brazil')",
         value="Colombia",
@@ -1105,31 +1163,23 @@ def render_sovereign_rates() -> None:
         key="rates_selected_series",
     )
     series_id = options[selected_label]
-
     col1, col2 = st.columns(2)
     with col1:
-        rates_start = st.date_input("Fecha inicial", value=pd.Timestamp("2015-01-01"), key="rates_start")
+        rates_start = st.date_input("Fecha inicial", value=pd.Timestamp("2015-01-01"), key="rates_start_free")
     with col2:
-        rates_end = st.date_input("Fecha final", value=pd.Timestamp.today(), key="rates_end")
+        rates_end = st.date_input("Fecha final", value=pd.Timestamp.today(), key="rates_end_free")
+    try:
+        series = _fred_series(fred_api_key, series_id, rates_start, rates_end)
+    except Exception as exc:
+        st.error(f"Error al descargar la serie: {exc}")
+        return
+    if series.empty:
+        st.warning("No se encontraron observaciones válidas para ese rango de fechas.")
+        return
+    st.line_chart(series, height=250)
+    st.metric("Última tasa disponible", f"{series.iloc[-1]:.2f}%", help=f"Fecha: {series.index[-1].date()}")
 
-    if st.button("Traer serie histórica", key="rates_fetch_button"):
-        with st.spinner("Descargando de FRED..."):
-            try:
-                series = fetch_bond_series(fred_api_key, series_id, rates_start, rates_end)
-            except Exception as exc:
-                st.error(f"Error al descargar la serie: {exc}")
-                series = pd.Series(dtype=float)
-        if series.empty:
-            st.warning("No se encontraron observaciones válidas para ese rango de fechas.")
-        else:
-            st.line_chart(series, height=250)
-            st.metric(
-                "Última tasa disponible",
-                f"{series.iloc[-1]:.2f}%",
-                help=f"Fecha: {series.index[-1].date()}",
-            )
-            with st.expander("Ver datos en tabla"):
-                st.dataframe(series.rename("tasa_%"))
+
 def render_portfolio_forecast() -> None:
     """
     Pronóstico individual por activo para una canasta con montos invertidos en
