@@ -19,3 +19,9 @@ La ejecución es simulada. No usar cuentas de producción del profesor, publicar
 ## Ubicación del paquete en este repositorio
 
 El paquete está en `paquete_v2/` con su estructura original (`prompts/`, `documentos/`, `plantillas/`, `data/`, `cuadernos/`). Las rutas citadas arriba son relativas a esa carpeta. `paquete_v2/data/` contiene datos sintéticos y del caso docente; es distinta de `data/` en la raíz, que la app genera en ejecución y no se versiona.
+
+## Registro de la ampliación v2 en el código
+
+- Convención: la capa individual v1 sigue con g = ln(P_t/P_{t-1}) (`src/analytics.py`, sin cambios). La capa de cartera usa R = exp(g) − 1 y R_p = Σ w_i R_i (`src/portfolio.py`); el log de la cartera es ln(1 + R_p).
+- Módulos nuevos, aislados de la v1: `src/portfolio.py`, `src/black_litterman.py`, `src/rebalance.py`, `src/capm.py`, `src/market.py` y la interfaz `laboratorio_v2.py`. Pruebas en `tests/unit/test_*_v2.py`, sin red, con los datos de `paquete_v2/data/`.
+- Los valores iniciales de la interfaz (rf, gamma, cotas, delta, tau, w_ref, views, banda de rebalanceo) son los del caso docente de control y están rotulados así; no son decisiones del equipo.

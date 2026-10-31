@@ -17,10 +17,45 @@ curso Teoría Moderna de Portafolios, Tech Business School - Universidad EIA.
 
 ## Alcance
 
-Analiza el riesgo y rendimiento histórico de un activo, y compara
-simultáneamente un mínimo de 20 activos. **No** calcula pesos, covarianzas,
-correlaciones conjuntas, frontera eficiente ni recomendaciones de inversión
-(es una fase de preselección, no de asset allocation).
+**v1 (preselección, se conserva):** analiza el riesgo y rendimiento
+histórico de un activo y compara simultáneamente un mínimo de 20 activos.
+Sus módulos, pruebas y convención logarítmica no cambian.
+
+**v2 (ampliación explícita del alcance, paquete docente «BOT de Portafolios
+v2»):** las exclusiones de la v1 sobre pesos, covarianzas, correlaciones
+conjuntas y frontera eficiente quedan **sustituidas** para esta etapa. La
+sección «Laboratorio de portafolios (v2)» agrega riesgo conjunto
+(covarianza, correlación, contribuciones, riesgo móvil), Markowitz
+(frontera eficiente y no eficiente, mínima varianza, tangente, óptimo
+personal, máximo rendimiento, CAL), Black-Litterman, rebalanceo simulado,
+beta/CAPM/Hamada y valoración (caso Alimentos del Norte), más un panel de
+cotización en línea con la antigüedad del dato. Sigue sin ser una
+recomendación de inversión y la ejecución es solo simulada. El paquete
+docente está en `paquete_v2/` (no se modifica; ver su `MANIFIESTO_SHA256.json`).
+
+El nombre visual del bot en la interfaz es **DPST**; el nombre oficial del
+entregable sigue siendo el del título de este README.
+
+## Mandato del equipo (v2)
+
+_Formato de `paquete_v2/plantillas/DECISION_Y_APRENDIZAJE.md`. Lo completa el
+equipo: la IA no llena estas decisiones._
+
+- Usuario y decisión: _pendiente (decisión del equipo)_
+- Ruta principal y necesidad: _pendiente (decisión del equipo)_
+- Universo, benchmark, moneda y horizonte: _pendiente (decisión del equipo)_
+- Objetivo y restricciones: _pendiente (decisión del equipo)_
+- Convención, ventana y estimador de mu/Sigma: retornos simples para la
+  cartera, media y covarianza muestral (ddof=1) sobre muestra común en la
+  frecuencia nativa; ventana: _pendiente (decisión del equipo)_
+- Prior, regla de views y confianza: _pendiente (decisión del equipo)_
+- Rebalanceo, costos y criterio de abstención: _pendiente (decisión del equipo)_
+- Fuente, disponibilidad y derechos: Yahoo Finance vía `yfinance` (uso
+  académico; Yahoo prohíbe redistribuir sus datos y publica con retraso según
+  la bolsa); datos sintéticos y del caso docente del paquete.
+- Base v1, rama, commit y pruebas: base v1 en `f6ce7d9` (54 pruebas en
+  verde); la ampliación v2 se desarrolla en ramas de trabajo y se integra a
+  `main` por pull request.
 
 ## Ejecución local
 
@@ -54,7 +89,15 @@ guía a `tests/fixtures/` (mismos nombres exactos):
 - `Resultados_esperados_20_activos_TBS_EIA.csv`
 - `Anexo_matriz_casos_prueba_robot_analitico_TBS_EIA_FINAL.csv`
 
-La suite cubre T-01 a T-17 (cálculo de rendimientos, estadísticas
+Las pruebas de la v2 (`tests/unit/test_*_v2.py`, 34 pruebas sin red) usan
+los datos del paquete docente en `paquete_v2/data/` y cubren P2-6 a P2-17,
+P2-19 a P2-28 y P2-31 a P2-34 de la guía v2 (controles analíticos de dos
+activos, Black-Litterman, rebalanceo y caso Alimentos del Norte). La conexión
+real a Yahoo (P2-3), la evaluación walk-forward de estrategias (P2-29, P2-30)
+y la defensa (P2-36) se verifican aparte o están pendientes; un mock no
+acredita una conexión real.
+
+La suite de la v1 cubre T-01 a T-17 (cálculo de rendimientos, estadísticas
 descriptivas, remuestreo, modelos de pronóstico, validación walk-forward,
 VaR, niveles de entrada/salida, comparación de 20 activos, dominancia y
 preselección), verificados con tolerancia atol=1e-8/rtol=1e-10 contra los
@@ -75,6 +118,13 @@ src/analytics.py # rendimientos log, descriptivos, diagnósticos
 src/forecasting.py # modelos homocedásticos y walk-forward
 src/risk_rules.py # VaR, niveles de entrada/salida, probabilidades
 src/comparison.py # comparación de N activos, dominancia, preselección
+src/portfolio.py # v2: retornos simples de cartera, covarianza/correlación, riesgo, Markowitz
+src/black_litterman.py # v2: prior, views, posterior y matriz predictiva
+src/rebalance.py # v2: libro de posiciones, deriva, costos y política de rebalanceo simulado
+src/capm.py # v2: beta OLS, Hamada, Ke, WACC, FCFF y valor terminal
+src/market.py # v2: cotización en línea (barras de 1 minuto) con antigüedad del dato
+laboratorio_v2.py # v2: interfaz del laboratorio de portafolios
+paquete_v2/ # material docente v2 (no se modifica; verificado con su manifiesto SHA256)
 src/charts.py # gráficos y mapa histórico rendimiento-riesgo
 src/lifecycle.py # purga y ciclo de vida de datos
 scripts/ver_registro_accesos.py # imprime en terminal el contenido de data/access_log.sqlite3
@@ -126,8 +176,10 @@ inmutable, outbox y purga automática por retención): nombre y correo siguen
 sin verificarse contra un proveedor real, y esa parte permanece pendiente
 de la Fase de seguridad (ver `TRACEABILITY.md`, RF-02, RNF-03).
 
-**Posición.** Únicamente posición larga para el núcleo obligatorio; el
-sistema no opera ni simula posiciones cortas.
+**Posición.** Únicamente posición larga para el núcleo de la v1. En el
+laboratorio v2, los límites de peso por activo los decide el equipo (por
+defecto entre 0 y 1, sin cortos ni deuda); el rebalanceo simulado no admite
+cortos ni caja negativa.
 
 **Ventana y frecuencia.** El usuario elige fecha inicial, fecha final y
 frecuencia (diaria, semanal o mensual). El remuestreo siempre ocurre ANTES
@@ -137,9 +189,12 @@ estadísticas descriptivas; para pronóstico y validación walk-forward, el
 número de rendimientos T debe cumplir T ≥ max(2m,5H)+H+9 (sección 5.5,
 donde m son los periodos por año de la frecuencia elegida y H el horizonte).
 
-**Rendimiento.** Exclusivamente logarítmico: g_t = ln(P_t / P_{t-1}). Es la
-única definición admitida en todo el sistema (RF-10); no existe una ruta de
-cálculo con rendimientos simples. La anualización usa μ_anual = m·ḡ y
+**Rendimiento.** En la capa individual de la v1, exclusivamente logarítmico:
+g_t = ln(P_t / P_{t-1}) (RF-10). **Ampliación v2:** la capa de cartera usa
+rendimientos simples R_t = exp(g_t) − 1, porque el rendimiento de una
+cartera es R_p = Σ w_i R_i; su log-rendimiento es ln(1 + R_p), no Σ w_i g_i
+(con +10 % y −10 % a partes iguales la cartera rinde 0 % y el promedio de
+logs es negativo; prueba P2-6). La convención de la v1 no se modifica. La anualización usa μ_anual = m·ḡ y
 σ_anual = √m·s_g, con m = 252 (diaria), 52 (semanal) o 12 (mensual).
 
 **Horizonte.** El usuario define H como una cantidad entera positiva de
@@ -228,6 +283,9 @@ Lodderstedt, T., Bradley, J., Labunets, A., & Fett, D. (2025). *Best current
 practice for OAuth 2.0 security* (BCP 240, RFC 9700). RFC Editor.
 https://doi.org/10.17487/RFC9700
 
+Black, F., & Litterman, R. (1992). Global portfolio optimization. *Financial
+Analysts Journal, 48*(5), 28-43. https://doi.org/10.2469/faj.v48.n5.28
+
 Markowitz, H. (1952). Portfolio selection. *The Journal of Finance, 7*(1),
 77-91. https://doi.org/10.1111/j.1540-6261.1952.tb01525.x
 
@@ -238,9 +296,19 @@ Microsoft. (2026, 30 de junio). *OpenID Connect (OIDC) on the Microsoft
 identity platform.* Microsoft Learn.
 https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc
 
+pandas development team. (s. f.). *pandas.DataFrame.cov.*
+https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.cov.html
+
+PyPortfolioOpt. (s. f.). *Black-Litterman allocation.*
+https://pyportfolioopt.readthedocs.io/en/latest/BlackLitterman.html
+
 OWASP Foundation. (2025). *OWASP application security verification
 standard* (Version 5.0.0).
 https://owasp.org/www-project-application-security-verification-standard/
+
+Restrepo Montoya, J. E. (2026). *BOT de Portafolios. Escalamiento a la
+versión 2* [Guía, prompt tutor, banco de preguntas y datos de control,
+versión 2.0]. Material docente (incluido en `paquete_v2/`).
 
 Souppaya, M., Scarfone, K., & Dodson, D. (2022). *Secure Software
 Development Framework (SSDF) version 1.1: Recommendations for mitigating
