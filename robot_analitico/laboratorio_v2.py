@@ -150,7 +150,7 @@ def _pct(x, digits=2):
 
 
 def _explain(title: str, body: str):
-    with st.expander(f"ℹ️ {title}"):
+    with st.expander(title):
         st.markdown(body)
 
 
@@ -295,7 +295,7 @@ def _heatmap(matrix: pd.DataFrame, title: str, zmid=None, fmt=".2f"):
 # ---------------------------------------------------------------------------
 
 def _render_live_quote():
-    st.markdown("#### 📡 Cotización en línea (reloj de cotización)")
+    st.markdown("#### Cotización en línea (reloj de cotización)")
     st.caption(
         "Consulta la última barra de 1 minuto de Yahoo Finance. «Consultado ahora» no significa "
         "«negociado ahora»: Yahoo publica con retraso según la bolsa, y fuera de sesión se muestra el "
@@ -383,7 +383,7 @@ def _tab_risk(lab: LabData):
     if lab.calendar is not None:
         age = last_bar_age(pd.DatetimeIndex([lab.last_date]))
         issues = lab.calendar
-        with st.expander(f"🔎 Calidad del dato: {len(issues)} observación(es) · {lab.gap_removed} rendimiento(s) anulados por huecos · "
+        with st.expander(f"Calidad del dato: {len(issues)} observación(es) · {lab.gap_removed} rendimiento(s) anulados por huecos · "
                          f"último dato hace {age:.1f} días"):
             st.caption("Un hueco mayor al normal para la frecuencia no se convierte en un rendimiento de un periodo: se anula "
                        "antes de la máscara común. También se reportan fechas duplicadas, precios no positivos y precios estancados.")
@@ -1156,7 +1156,7 @@ def _tab_capm(lab: LabData):
     ], columns=["concepto", "valor", "detalle"]), hide_index=True)
 
     st.markdown("#### Proyección y valoración del caso (5 años)")
-    st.info("ℹ️ **Pendiente de confirmar:** la regla del caso que usa `capacidad_ventas` y `capex_venta_adicional` para "
+    st.info("**Pendiente de confirmar:** la regla del caso que usa `capacidad_ventas` y `capex_venta_adicional` para "
             "calcular el CAPEX y la depreciación está en el PDF del caso, que no está en el repositorio. Mientras el "
             "equipo la confirma, el CAPEX y la depreciación de cada año se escriben a mano en la tabla.")
     _explain("¿Qué significa cada entrada de la valoración y qué pongo?", """
@@ -1357,7 +1357,7 @@ def _tab_export(lab: LabData, rf_ea, gamma, bounds, groups, results):
     if problems:
         st.error("La exportación no es coherente: " + "; ".join(problems))
     else:
-        st.success("✅ Traza verificada: el hash coincide con el snapshot exportado, con parámetros y commit.")
+        st.success("Traza verificada: el hash coincide con el snapshot exportado, con parámetros y commit.")
     st.json(trace, expanded=False)
     c1, c2 = st.columns(2)
     c1.download_button("Descargar traza (JSON)", files["traza.json"], file_name=f"traza_{trace['analysis_id'][:8]}.json",
@@ -1400,7 +1400,7 @@ solo cambia cuando la política del equipo lo indica.
     source = st.radio("Fuente de datos del laboratorio", [SOURCE_TWO, SOURCE_SYNTH, SOURCE_MARKET], key="lab_source")
     if source == SOURCE_TWO:
         lab = _load_lab_data(source)
-        st.info("📘 **Caso docente de control.** Parámetros anuales dados (μ, Σ): sirve para reconstruir los cálculos a mano.")
+        st.info("**Caso docente de control.** Parámetros anuales dados (μ, Σ): sirve para reconstruir los cálculos a mano.")
     else:
         loaded = _load_lab_data(source)
         if loaded is None:
@@ -1408,9 +1408,9 @@ solo cambia cuando la política del equipo lo indica.
             return
         prices, m, label, frequency = loaded
         if source == SOURCE_SYNTH:
-            st.warning("🧪 **MODO LABORATORIO SINTÉTICO.** Series generadas para practicar: **no son cotizaciones reales**.")
+            st.warning("**MODO LABORATORIO SINTÉTICO.** Series generadas para practicar: **no son cotizaciones reales**.")
         else:
-            st.success("📈 **MODO MERCADO.** Precios históricos de Yahoo Finance traídos en la sección Comparación.")
+            st.success("**MODO MERCADO.** Precios históricos de Yahoo Finance traídos en la sección Comparación.")
         all_assets = list(prices.columns)
         chosen = st.multiselect("Universo (decisión del equipo)", all_assets, default=all_assets, key=f"lab_universe_{source}")
         if len(chosen) < 2:
@@ -1424,7 +1424,7 @@ solo cambia cuando la política del equipo lo indica.
     st.caption(lab.label + (" Frecuencia nativa: anual." if lab.m == 1 else f" Frecuencia nativa: {lab.m} periodos por año."))
 
     with st.container(border=True):
-        st.markdown("**⚙️ Supuestos financieros (decisión del equipo; iniciales = caso docente de control)**")
+        st.markdown("**Supuestos financieros (decisión del equipo; iniciales = caso docente de control)**")
         ctrl = _load_json("dos_activos.json")
         c1, c2, c3, c4 = st.columns(4)
         rf_ea = c1.number_input("Tasa libre de riesgo (efectiva anual)", value=float(ctrl["rf"]), step=0.005, format="%.4f", key="lab_rf",
@@ -1453,7 +1453,7 @@ pesos entre 0 y 1): sirven para reproducir el ejercicio del profesor, no son una
 **1. Tasa libre de riesgo (efectiva anual)** — ejemplo en pantalla: `0.0300` = **3 % al año**
 - Qué es: lo que gana un inversionista sin asumir riesgo de impago, en la **misma moneda** de los activos.
 - Dónde se busca: si los activos están en USD, la tasa de un bono del Tesoro de EE. UU. de corto plazo (pestaña
-  🏛️ Tasas soberanas o FRED); si trabajan en COP, un TES de corto plazo.
+  Tasas soberanas o FRED); si trabajan en COP, un TES de corto plazo.
 - Cómo se escribe: en decimal y efectiva anual (4 % → `0.04`). La app la convierte a la frecuencia de los datos.
 - Para qué se usa: Sharpe, cartera tangente (máximo Sharpe), CAL y CAPM.
 
@@ -1537,11 +1537,11 @@ sector).
               for name, cap in caps.items() if cap < 1.0] or None
 
     st.markdown(LAB_NAV_CSS, unsafe_allow_html=True)
-    st.markdown("#### 🧭 Módulos del laboratorio")
+    st.markdown("#### Módulos del laboratorio")
     st.caption("Elige un módulo; los supuestos de arriba aplican a todos.")
     with st.container(key="lab_nav"):
-        tabs = st.tabs(["🔗 Riesgo conjunto", "🌪️ Estrés y estimadores", "📈 Markowitz y fronteras", "🧠 Black-Litterman",
-                        "🔄 Rebalanceo", "⏪ Backtest", "🏦 Beta, CAPM y valoración", "📤 Exportar"])
+        tabs = st.tabs(["Riesgo conjunto", "Estrés y estimadores", "Markowitz y fronteras", "Black-Litterman",
+                        "Rebalanceo", "Backtest", "Beta, CAPM y valoración", "Exportar"])
     results = None
     with tabs[0]:
         w_test = _tab_risk(lab)

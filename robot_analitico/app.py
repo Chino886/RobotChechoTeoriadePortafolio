@@ -408,7 +408,7 @@ def render_disclaimer_gate(user_name: str, user_email: str) -> None:
     )
 
     accept_clicked = st.button(
-        "✅ Aceptar y continuar",
+        "Aceptar y continuar",
         type="primary",
         disabled=not (privacy_ok and disclaimer_ok),
     )
@@ -929,7 +929,7 @@ def render_comparison() -> None:
         st.dataframe(table)
 
     with tab_map:
-        st.markdown("**⭐ Marca tu elección final**")
+        st.markdown("**Marca tu elección final**")
         starred = st.selectbox(
             "¿Cuál de estos activos elegiste como tu preselección final?",
             ["(Ninguno)"] + [s.ticker for s in result.summaries],
@@ -954,7 +954,7 @@ def render_comparison() -> None:
         )
         st.write("")
         selection_mode = st.radio(
-            "👤 ¿Cómo quieres elegir el activo preseleccionado?",
+            "¿Cómo quieres elegir el activo preseleccionado?",
             ["Por perfil de riesgo (recomendado)", "Manual (elijo el criterio yo mismo)"],
             horizontal=True,
             key="comparison_selection_mode",
@@ -963,15 +963,15 @@ def render_comparison() -> None:
 
         if selection_mode == "Por perfil de riesgo (recomendado)":
             risk_profile_explanations = {
-                "🟢 Conservador": (
+                "Conservador": (
                     "Prioriza la estabilidad: elige el activo con menor volatilidad "
                     "entre los que no han tenido rendimiento promedio negativo."
                 ),
-                "🟡 Moderado": (
+                "Moderado": (
                     "Busca equilibrio: elige el activo que más rendimiento ha dado "
                     "por cada unidad de volatilidad (mayor razón media-volatilidad)."
                 ),
-                "🔴 Agresivo": (
+                "Agresivo": (
                     "Prioriza el rendimiento: elige el activo con mayor media histórica "
                     "aceptando una volatilidad anualizada de hasta 40%."
                 ),
@@ -988,9 +988,9 @@ def render_comparison() -> None:
                 st.markdown(f"**Perfil {risk_profile}**")
                 st.caption(risk_profile_explanations[risk_profile])
 
-            if risk_profile == "🟢 Conservador":
+            if risk_profile == "Conservador":
                 selected = preselect_min_vol_under_min_mean(result.summaries, min_mean=0.0)
-            elif risk_profile == "🟡 Moderado":
+            elif risk_profile == "Moderado":
                 selected = preselect_max_rvr(result.summaries)
             else:
                 selected = preselect_max_mean_under_risk_limit(result.summaries, risk_limit=0.40)
@@ -1192,7 +1192,7 @@ def render_portfolio_forecast() -> None:
         )
 
     with st.expander(
-        "ℹ️ Más información: qué significan estos parámetros y cómo funcionan los modelos"
+        "Más información: qué significan estos parámetros y cómo funcionan los modelos"
     ):
         st.markdown(
             "#### Parámetros de entrada\n\n"
@@ -1241,7 +1241,7 @@ def render_portfolio_forecast() -> None:
             "promedio) va a continuar.\n"
             "- Es más **optimista** si el activo ha subido mucho históricamente, y "
             "más **pesimista** si ha bajado.\n\n"
-            "⚠️ Ninguno de los dos modelos garantiza el futuro: son supuestos "
+            "Ninguno de los dos modelos garantiza el futuro: son supuestos "
             "estadísticos simplificados, con fines académicos. Comparar ambos "
             "ayuda a ver qué tanto depende el resultado de suponer (o no) que la "
             "tendencia pasada se mantiene."
@@ -1311,7 +1311,7 @@ def render_portfolio_forecast() -> None:
             "- *Probabilidad de ganar/perder*: probabilidad de que el precio final "
             "quede por encima o por debajo del punto de equilibrio P_BE, que ya "
             "incluye las comisiones de compra y venta.\n\n"
-            "⚠️ Son estimaciones estadísticas basadas en el historial de precios; "
+            "Son estimaciones estadísticas basadas en el historial de precios; "
             "no garantizan resultados futuros ni constituyen una recomendación de "
             "inversión."
         )
@@ -1394,7 +1394,7 @@ def render_portfolio_forecast() -> None:
                         ""
                         if h_max >= horizon
                         else (
-                            f" ⚠️ Este plazo (H={horizon}) supera el límite de suficiencia "
+                            f" Este plazo (H={horizon}) supera el límite de suficiencia "
                             f"walk-forward de la sección 5.5 para este activo (H_max={h_max} "
                             "con los datos actuales) — el pronóstico puntual igual se calcula."
                         )
@@ -1601,11 +1601,11 @@ def compute_price_milestones(
     min_date, min_price = prices.idxmin(), float(prices.min())
     below_max = last_price / max_price - 1
     summary = [
-        f"🏁 Inicio del historial: {day(first_date)} a {first_price:,.2f} "
+        f"Inicio del historial: {day(first_date)} a {first_price:,.2f} "
         f"(desde entonces: {last_price / first_price - 1:+,.0%})",
-        f"🏔️ Máximo histórico: {max_price:,.2f} el {day(max_date)}"
+        f"Máximo histórico: {max_price:,.2f} el {day(max_date)}"
         + (" — hoy está en su máximo" if below_max > -0.005 else f" — hoy está {-below_max:.0%} por debajo"),
-        f"🕳️ Mínimo histórico: {min_price:,.2f} el {day(min_date)}",
+        f"Mínimo histórico: {min_price:,.2f} el {day(min_date)}",
     ]
 
     # Peor desplome: mayor caída desde un máximo previo hasta un valle.
@@ -1621,7 +1621,7 @@ def compute_price_milestones(
             f"se recuperó el {day(recovered.index[0])}" if not recovered.empty else "aún no se recupera"
         )
         summary.append(
-            f"📉 Peor desplome: {worst_drawdown:.0%} desde el {day(peak_date)} "
+            f"Peor desplome: {worst_drawdown:.0%} desde el {day(peak_date)} "
             f"hasta el {day(trough_date)} ({recovery})"
         )
     sections.append(("Resumen", summary))
@@ -1633,12 +1633,12 @@ def compute_price_milestones(
         downs = daily.nsmallest(MILESTONE_TOP_MOVES)
         sections.append((
             f"Mayores subidas en {period_label}",
-            [f"🚀 {day(d)}: {r:+.1%} — [¿qué pasó?]({_news_search_link(ticker, day(d))})"
+            [f"{day(d)}: {r:+.1%} — [¿qué pasó?]({_news_search_link(ticker, day(d))})"
              for d, r in ups.items() if r > 0],
         ))
         sections.append((
             f"Mayores caídas en {period_label}",
-            [f"💥 {day(d)}: {r:+.1%} — [¿qué pasó?]({_news_search_link(ticker, day(d))})"
+            [f"{day(d)}: {r:+.1%} — [¿qué pasó?]({_news_search_link(ticker, day(d))})"
              for d, r in downs.items() if r < 0],
         ))
 
@@ -1655,8 +1655,8 @@ def compute_price_milestones(
         sections.append((
             "Años",
             [
-                f"🏆 Mejor año: {year_label(best)}, {yearly[best]:+.0%}",
-                f"⚠️ Peor año: {year_label(worst)}, {yearly[worst]:+.0%}",
+                f"Mejor año: {year_label(best)}, {yearly[best]:+.0%}",
+                f"Peor año: {year_label(worst)}, {yearly[worst]:+.0%}",
             ],
         ))
 
@@ -1681,7 +1681,7 @@ def _get_yfinance_milestones(ticker: str) -> "list[tuple[str, list[str]]]":
     try:
         splits = yf.Ticker(ticker).splits
         split_lines = [
-            f"✂️ {str(pd.Timestamp(d).date())}: {ratio:g} por 1" for d, ratio in splits.tail(5).items()
+            f"{str(pd.Timestamp(d).date())}: {ratio:g} por 1" for d, ratio in splits.tail(5).items()
         ]
         if split_lines:
             sections.append(("Divisiones de acciones (splits)", split_lines))
@@ -1757,7 +1757,7 @@ def _render_top_news(target, news_by_source: "list[tuple[str, list[dict]]]", lim
         _render_news_block(target, source_label, kept[:limit])
         shown_any = shown_any or bool(kept)
     if hidden_total:
-        target.caption(f"🔗 Se ocultaron {hidden_total} noticia(s) cuyo enlace no llevaba a la noticia "
+        target.caption(f"Se ocultaron {hidden_total} noticia(s) cuyo enlace no llevaba a la noticia "
                        "(enlace roto, página de redirección o de consentimiento).")
     return shown_any
 
@@ -1775,14 +1775,14 @@ def render_news_sidebar() -> None:
         ticker = result.ticker if result is not None and result.ok else None
 
         st.sidebar.divider()
-        st.sidebar.subheader("📰 Noticias e hitos")
+        st.sidebar.subheader("Noticias e hitos")
         st.sidebar.caption(
             "Fuentes: Yahoo Finance, Google News y Alpha Vantage. Cada "
             "noticia muestra su medio original y su link real; esta sección "
             "es informativa, no hace parte del análisis cuantitativo del bot."
         )
 
-        with st.sidebar.expander(f"📅 Hitos históricos{f' de {ticker}' if ticker else ''}"):
+        with st.sidebar.expander(f"Hitos históricos{f' de {ticker}' if ticker else ''}"):
             if not ticker:
                 st.caption("Descarga un activo en \"Datos: probar un activo\" para ver sus hitos.")
             else:
@@ -1803,7 +1803,7 @@ def render_news_sidebar() -> None:
                 else:
                     st.caption("No se encontraron hitos para este activo en este momento.")
 
-        with st.sidebar.expander("📰 Noticias más relevantes"):
+        with st.sidebar.expander("Noticias más relevantes"):
             if ticker:
                 st.markdown(f"**{ticker}**")
                 if not _render_top_news(st, _collect_news(ticker), NEWS_SIDEBAR_ITEMS):
@@ -1813,7 +1813,7 @@ def render_news_sidebar() -> None:
                 st.info("No se encontraron noticias generales en este momento.")
 
         if st.sidebar.button(
-            "🗞️ Ver todas las noticias económicas", key="news_open_panel", use_container_width=True
+            "Ver todas las noticias económicas", key="news_open_panel", use_container_width=True
         ):
             st.session_state["show_news_panel"] = True
     except Exception:
@@ -1834,9 +1834,9 @@ def render_news_panel() -> None:
         with st.container(border=True):
             col_title, col_close = st.columns([4, 1])
             with col_title:
-                st.subheader("🗞️ Noticias económicas")
+                st.subheader("Noticias económicas")
             with col_close:
-                if st.button("✖ Cerrar", key="news_close_panel", use_container_width=True):
+                if st.button("Cerrar", key="news_close_panel", use_container_width=True):
                     st.session_state["show_news_panel"] = False
                     st.rerun()
             st.caption(
@@ -1862,7 +1862,7 @@ def render_news_panel() -> None:
 
 # dismissible=False: sin X ni Esc. Si se pudiera cerrar así, la app quedaría
 # en blanco (todo lo demás está detenido con st.stop hasta que se responda).
-@st.dialog("⚠️ Antes de entrar", dismissible=False)
+@st.dialog("Antes de entrar", dismissible=False)
 def render_intro_alert():
     st.write(
         "Esta app está hecha para mirar comportamientos históricos y "
@@ -1918,36 +1918,36 @@ def main() -> None:
     # los datos escritos en una sección no se borren al pasar a otra.
     with st.container(key="dpst_nav"):
         tab_home, tab_pre, tab_rates, tab_lab = st.tabs(
-            ["🏠 Inicio", "🔎 Preselección de activos", "🏛️ Tasas soberanas", f"🧪 {LAB_TITLE}"]
+            ["Inicio", "Preselección de activos", "Tasas soberanas", LAB_TITLE]
         )
         with tab_home:
             render_home(user_name, user_email)
         with tab_pre:
             render_preselection_page()
         with tab_rates:
-            _page_title("🏛️", "Tasas de bonos soberanos",
+            _page_title("Tasas de bonos soberanos",
                         "Referencia macroeconómica por país (FRED). No entra en la preselección ni en el laboratorio.")
             render_sovereign_rates()
         with tab_lab:
-            _page_title("🧪", LAB_TITLE,
+            _page_title(LAB_TITLE,
                         "Carteras simuladas con los modelos del avance 2.")
             render_portfolio_lab()
 
 
-def _page_title(icon: str, title: str, subtitle: str) -> None:
+def _page_title(title: str, subtitle: str) -> None:
     st.markdown(
-        f'<div class="dpst-page-title">{icon} {title}</div><div class="dpst-page-sub">{subtitle}</div>',
+        f'<div class="dpst-page-title">{title}</div><div class="dpst-page-sub">{subtitle}</div>',
         unsafe_allow_html=True,
     )
 
 
 HOME_SECTIONS = [
-    ("🔎", "Preselección de activos",
+    ("Preselección de activos",
      "Descarga un activo, mira su historia y su pronóstico, y compara varios para preseleccionar los que no están dominados."),
-    ("🏛️", "Tasas soberanas", "Tasas de bonos a 10 años por país (FRED) como referencia del contexto macro."),
-    ("🧪", LAB_TITLE,
+    ("Tasas soberanas", "Tasas de bonos a 10 años por país (FRED) como referencia del contexto macro."),
+    (LAB_TITLE,
      "Arma carteras simuladas: Markowitz, Black-Litterman, rebalanceo, backtest, beta/CAPM y valoración."),
-    ("📰", "Noticias e hitos", "En la barra lateral: noticias verificadas y movimientos históricos del activo."),
+    ("Noticias e hitos", "En la barra lateral: noticias verificadas y movimientos históricos del activo."),
 ]
 
 
@@ -1963,7 +1963,7 @@ def render_home(user_name: str, user_email: str) -> None:
         unsafe_allow_html=True,
     )
     st.markdown(
-        '<div class="dpst-notice"><b>⚠️ Este bot no selecciona activos para invertir en la vida real.</b> '
+        '<div class="dpst-notice"><b>Este bot no selecciona activos para invertir en la vida real.</b> '
         "Es una herramienta de <b>preselección</b> con fines académicos: ayuda a estudiar activos y carteras "
         "con datos históricos y modelos del curso, pero no es asesoría financiera ni recomendación de inversión, "
         "no ejecuta operaciones y no garantiza resultados.</div>",
@@ -1971,15 +1971,15 @@ def render_home(user_name: str, user_email: str) -> None:
     )
     st.markdown("#### Qué encuentras en cada sección")
     cols = st.columns(len(HOME_SECTIONS))
-    for col, (ico, title, desc) in zip(cols, HOME_SECTIONS):
+    for col, (title, desc) in zip(cols, HOME_SECTIONS):
         col.markdown(
-            f'<div class="dpst-card"><div class="ico">{ico}</div><div class="t">{title}</div>'
+            f'<div class="dpst-card"><div class="t">{title}</div>'
             f'<div class="d">{desc}</div></div>',
             unsafe_allow_html=True,
         )
-    with st.expander("📜 Disclaimer académico completo"):
+    with st.expander("Disclaimer académico completo"):
         st.write(DISCLAIMER_TEXT)
-    with st.expander("👥 Equipo y política de uso"):
+    with st.expander("Equipo y política de uso"):
         for member in MEMBERS:
             st.write(f"- {member}")
         st.info(EXECUTION_POLICY_SUMMARY)
@@ -1994,7 +1994,7 @@ def _need_asset() -> bool:
     """True si ya hay un activo descargado; si no, deja un aviso dentro de la sección."""
     result = st.session_state.get("asset_result")
     if result is None or not result.ok:
-        st.info("Primero descarga un activo en **📥 Datos del activo a probar**.")
+        st.info("Primero descarga un activo en **Datos del activo a probar**.")
         return False
     return True
 
@@ -2049,21 +2049,21 @@ def render_preselection_page() -> None:
     Preselección (v1): cada bloque es desplegable para no tener que bajar
     tanto; se abre solo lo que se esté mostrando.
     """
-    _page_title("🔎", "Preselección de activos",
+    _page_title("Preselección de activos",
                 "Abre solo la sección que vas a mostrar. Los datos se conservan al cerrar y abrir.")
-    with st.expander("📥 Datos del activo a probar", expanded=True):
+    with st.expander("Datos del activo a probar", expanded=True):
         render_asset_data()
     result = st.session_state.get("asset_result")  # leído después de una posible descarga
     ticker = f" · {result.ticker}" if result is not None and result.ok else ""
-    with st.expander(f"📊 Análisis histórico{ticker}"):
+    with st.expander(f"Análisis histórico{ticker}"):
         if _need_asset():
             render_historical_analysis()
-    with st.expander(f"🔮 Pronóstico{ticker}"):
+    with st.expander(f"Pronóstico{ticker}"):
         if _need_asset():
             render_forecast()
-    with st.expander("⚖️ Comparación y preselección de activos"):
+    with st.expander("Comparación y preselección de activos"):
         render_comparison()
-    with st.expander("🧺 Pronóstico por canasta de inversión (USD por activo)"):
+    with st.expander("Pronóstico por canasta de inversión (USD por activo)"):
         render_portfolio_forecast()
 
 
