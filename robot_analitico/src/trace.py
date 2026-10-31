@@ -55,34 +55,95 @@ def _result_dict(res) -> dict:
     }
 
 
+TEMPLATE_KEYS = [
+    "schema", "analysis_id", "snapshot_sha256", "code_commit", "dependencies", "source", "rights", "source_fields",
+    "event_at", "available_at", "received_at", "calculated_at", "timezone", "currency", "frequency",
+    "return_convention", "annualization", "asset_order", "missing_data_rule", "common_rows", "transformations",
+    "parameters", "solver", "residuals", "views_ids", "trigger_id", "rebalance_id", "student_decision",
+    "test_evidence", "status",
+]  # claves de paquete_v2/plantillas/trazabilidad.json
+
+
+def _versions() -> dict:
+    import scipy
+
+    return {"python": platform.python_version(), "pandas": pd.__version__, "numpy": np.__version__, "scipy": scipy.__version__}
+
+
 def build_trace(*, source: str, rights: str, periods_per_year: int, asset_order: "list[str]", snapshot_text: str,
                 parameters: dict, results: Optional[dict] = None, solver: Optional[str] = None,
                 common_rows: Optional[int] = None, rows_before_mask: Optional[int] = None,
                 views_ids: "Optional[list[str]]" = None, rebalance_ids: "Optional[list[str]]" = None,
-                code_commit: Optional[str] = None, student_decision: Optional[str] = None) -> dict:
-    return {
+                code_commit: Optional[str] = None, student_decision: Optional[str] = None,
+                currency: Optional[str] = None, timezone_name: Optional[str] = None, frequency: Optional[str] = None,
+                source_fields: "Optional[list[str]]" = None, event_at: Optional[str] = None,
+                available_at: Optional[str] = None, received_at: Optional[str] = None,
+                missing_data_rule: Optional[str] = None, transformations: "Optional[list[str]]" = None,
+                trigger_id: Optional[str] = None, test_evidence: Optional[str] = None) -> dict:
+    """
+    Traza con TODAS las claves de la plantilla trazabilidad.json. Un campo que
+    no aplica o no se conoce queda en null y su motivo va en `null_reasons`.
+    """
+    results = results or {}
+    residuals = {k: {"budget_residual": None if np.isnan(r.budget_residual) else float(r.budget_residual),
+                     "active_bounds": list(r.active_bounds)} for k, r in results.items()}
+    trace = {
         "schema": SCHEMA,
         "analysis_id": str(uuid.uuid4()),
         "snapshot_sha256": sha256_text(snapshot_text),
         "code_commit": code_commit or git_commit(),
-        "dependencies": {"python": platform.python_version(), "pandas": pd.__version__, "numpy": np.__version__},
+        "dependencies": _versions(),
         "source": source,
         "rights": rights,
+        "source_fields": source_fields,
+        "event_at": event_at,
+        "available_at": available_at,
+        "received_at": received_at,
         "calculated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "timezone": timezone_name,
+        "currency": currency,
+        "frequency": frequency,
         "frequency_periods_per_year": periods_per_year,
         "return_convention": "simple (capa de cartera); logs solo en la capa individual v1",
         "annualization": "mu*m, sigma*sqrt(m) (convención aritmética)",
         "asset_order": list(asset_order),
+        "missing_data_rule": missing_data_rule,
         "common_rows": common_rows,
         "rows_before_mask": rows_before_mask,
+        "transformations": transformations,
         "parameters": parameters,
         "solver": solver,
-        "results": {k: _result_dict(r) for k, r in (results or {}).items()},
+        "residuals": residuals or None,
+        "results": {k: _result_dict(r) for k, r in results.items()},
         "views_ids": list(views_ids or []),
+        "trigger_id": trigger_id,
+        "rebalance_id": (rebalance_ids or [None])[-1],  # el último rebalanceo de la ejecución
         "rebalance_ids": list(rebalance_ids or []),
         "student_decision": student_decision,  # lo completa el equipo
+        "test_evidence": test_evidence,
         "status": "ejecucion_laboratorio",
     }
+    reasons = {
+        "source_fields": "fuente sin campos de proveedor (parámetros dados o datos sintéticos)",
+        "event_at": "sin fecha de evento (parámetros dados por el caso)",
+        "available_at": "el proveedor no informa la hora de publicación del dato",
+        "received_at": "los datos no se descargaron en esta ejecución (sintéticos, caso o descarga previa sin registro)",
+        "timezone": "la fuente no informa zona horaria",
+        "currency": "la fuente no informa moneda",
+        "frequency": "parámetros anuales dados por el caso",
+        "missing_data_rule": "sin serie de precios",
+        "common_rows": "sin serie de precios",
+        "rows_before_mask": "sin serie de precios",
+        "transformations": "sin transformaciones registradas",
+        "solver": "no se ejecutó optimización en esta traza",
+        "residuals": "no se ejecutó optimización en esta traza",
+        "trigger_id": "ninguna decisión de esta ejecución fue disparada por un evento",
+        "rebalance_id": "no hubo rebalanceos en esta ejecución",
+        "student_decision": "decisión pendiente del equipo",
+        "test_evidence": "no se adjuntó evidencia de pruebas a esta ejecución",
+    }
+    trace["null_reasons"] = {k: reasons.get(k, "no aplica") for k in TEMPLATE_KEYS if trace.get(k) is None}
+    return trace
 
 
 def export_bundle(trace: dict, snapshot_text: str) -> "dict[str, str]":

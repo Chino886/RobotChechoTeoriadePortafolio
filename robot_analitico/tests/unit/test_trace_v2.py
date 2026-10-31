@@ -48,3 +48,24 @@ def test_tampered_export_is_detected():
     tampered = dict(files, **{"snapshot.csv": files["snapshot.csv"].replace("0.", "0.9", 1)})
     assert any("hash" in p for p in verify_bundle(tampered))
     assert sha256_text("a") != sha256_text("b")
+
+
+def test_trace_contains_every_template_key_with_null_reasons():
+    template = json.loads((ROOT / "paquete_v2" / "plantillas" / "trazabilidad.json").read_text())
+    files, _ = _bundle()
+    trace = json.loads(files["traza.json"])
+    missing = set(template) - set(trace)
+    assert not missing, f"faltan claves de la plantilla: {sorted(missing)}"
+    assert trace["schema"] == template["schema"]
+    assert "scipy" in trace["dependencies"]
+    for key in template:
+        if trace[key] is None:
+            assert key in trace["null_reasons"] and trace["null_reasons"][key], key  # null siempre con motivo
+    from src.trace import build_trace
+    full = build_trace(source="Yahoo", rights="académico", periods_per_year=252, asset_order=["A"], snapshot_text="x",
+                       parameters={"a": 1}, currency="USD", timezone_name="America/New_York", frequency="Diaria",
+                       source_fields=["Close"], event_at="2026-10-30", received_at="2026-10-31T00:00:00+00:00",
+                       missing_data_rule="máscara común", transformations=["pct_change"], trigger_id="E1",
+                       rebalance_ids=["R1", "R2"], test_evidence="pytest 140 passed", code_commit="c")
+    assert full["currency"] == "USD" and full["rebalance_id"] == "R2" and full["trigger_id"] == "E1"
+    assert "currency" not in full["null_reasons"]
