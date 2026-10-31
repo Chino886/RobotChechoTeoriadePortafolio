@@ -24,16 +24,13 @@ from src.capm import (
     beta_ols,
     cost_of_equity,
     discounted_cash_flow,
-    equity_value,
-    fcff,
     nominal_rate_to_other_currency,
     relever_beta,
     sml_required_return,
-    stable_reinvestment_rate,
     unlever_beta,
     wacc,
 )
-from src.backtest import ALL_STRATEGIES, BacktestConfig, walk_forward
+from src.backtest import ALL_STRATEGIES, ESTIMATORS, BacktestConfig, select_by_validation, walk_forward
 from src.charts import DARK_LAYOUT, ELECTRIC_BLUE, NEON_GREEN, STAR_GOLD
 from src.data import fetch_asset_data, resample_prices
 from src.data_quality import calendar_report, gap_safe_simple_returns, last_bar_age
@@ -51,6 +48,7 @@ from src.portfolio import (
     optimal_risky_share,
     optimal_risky_share_no_debt,
     personal_optimum,
+    cml_expected_return,
     portfolio_return_series,
     portfolio_stats,
     random_portfolios,
@@ -60,7 +58,7 @@ from src.portfolio import (
     rolling_volatility,
     weighted_average_volatility,
 )
-from src.rebalance import ACTION_REBALANCE, Book, MarketEvent, RebalancePolicy, Rebalancer, plan_rebalance
+from src.rebalance import ACTION_REBALANCE, Book, RebalancePolicy, plan_rebalance, simulate_policy
 from src.stress import (
     concentration,
     correlation_breakdown,
@@ -72,6 +70,7 @@ from src.stress import (
     worst_historical_portfolio_period,
 )
 from src.trace import build_trace, export_bundle, snapshot_csv, verify_bundle
+from src.valuation import Scenario, budget_target, iterate_capital_structure, project, reinvestment_check, value_firm
 
 PAQUETE_DATA = Path(__file__).parent / "paquete_v2" / "data"
 
@@ -153,6 +152,27 @@ def _pct(x, digits=2):
 def _explain(title: str, body: str):
     with st.expander(f"ℹ️ {title}"):
         st.markdown(body)
+
+
+INDICATORS_HELP = """
+- **Rendimiento esperado (anual):** promedio de los rendimientos simples × periodos por año. Es una expectativa
+  histórica, no una promesa.
+- **Volatilidad (anual):** desviación estándar × √(periodos por año). Mide cuánto se mueve el valor; no distingue
+  subidas de bajadas.
+- **Sharpe:** (rendimiento − tasa libre de riesgo) / volatilidad. Rendimiento extra por unidad de riesgo; más alto es
+  mejor, pero depende de la ventana y de la rf usada.
+- **Máximo drawdown:** la peor caída desde un máximo previo hasta un mínimo posterior (−20 % = en algún momento se
+  perdió una quinta parte desde el pico).
+- **VaR 95 % / 99 %:** pérdida que no se supera con esa confianza en un periodo. El paramétrico supone normalidad; el
+  histórico usa las pérdidas observadas. No dice cuánto se pierde en el peor 5 %.
+- **HHI y N efectivo:** HHI = Σw² mide concentración; N efectivo = 1/HHI dice a cuántos activos "iguales" equivale la
+  cartera (10 activos con N efectivo 2 = en la práctica se depende de 2).
+- **Contribución al riesgo:** cuánto de la volatilidad total aporta cada activo; suman la volatilidad de la cartera.
+- **Condicionamiento de Σ:** qué tan "frágil" es la matriz. Números muy grandes indican activos casi redundantes: los
+  pesos óptimos se vuelven inestables.
+- **Rotación (turnover):** ½·Σ|Δw|, fracción de la cartera que se compra/vende en una decisión.
+- **CAGR:** rendimiento anual compuesto que lleva del valor inicial al final.
+"""
 
 
 def _heatmap(matrix: pd.DataFrame, title: str, zmid=None, fmt=".2f"):
@@ -290,6 +310,7 @@ def _tab_risk(lab: LabData):
         fig.update_layout(title="Contribución de cada activo al riesgo (% de la volatilidad)", yaxis_tickformat=".0%", height=320, **LAYOUT)
         st.plotly_chart(fig)
 
+    _explain("¿Qué significa cada indicador?", INDICATORS_HELP)
     conc = concentration(w)
     a, b, c, d = st.columns(4)
     a.metric("Concentración (HHI)", f"{conc.hhi:.3f}", help="Σw². 1/N = lo más diversificado posible; 1 = un solo activo.")
@@ -363,10 +384,13 @@ def _tab_stress(lab: LabData, w, bounds, groups):
     st.caption("Los tamaños de los shocks y el límite de pérdida del mandato son decisiones del equipo; los valores de las "
                "cajas son solo ejemplos para explorar.")
     c1, c2, c3 = st.columns(3)
-    shock = c1.number_input("Shock individual (caída de un activo)", value=-0.20, max_value=0.0, step=0.05, format="%.2f", key="lab_st_shock")
-    rho = c2.number_input("Ruptura: correlación forzada", value=0.90, min_value=-0.99, max_value=1.0, step=0.05, format="%.2f", key="lab_st_rho")
+    shock = c1.number_input("Shock individual (caída de un activo)", value=-0.20, max_value=0.0, step=0.05, format="%.2f", key="lab_st_shock",
+                            help="Cuánto cae un activo de golpe (−0,20 = −20 %). Elijan un tamaño plausible para su universo.")
+    rho = c2.number_input("Ruptura: correlación forzada", value=0.90, min_value=-0.99, max_value=1.0, step=0.05, format="%.2f", key="lab_st_rho",
+                          help="En crisis las correlaciones suben: 0,9 simula que casi todo se mueve junto.")
     loss_limit = c3.number_input("Pérdida máxima del mandato (escenario inverso)", value=0.10, min_value=0.001, step=0.01,
-                                 format="%.3f", key="lab_st_loss")
+                                 format="%.3f", key="lab_st_loss",
+                                 help="La pérdida que el mandato no tolera en un periodo (0,10 = 10 %). Es decisión del equipo.")
 
     ind = individual_shocks(w, shock).sort_values(ascending=False)
     fig = go.Figure(go.Bar(x=list(ind.index), y=ind.to_numpy(), marker_color=ELECTRIC_BLUE))
@@ -441,12 +465,13 @@ def _tab_stress(lab: LabData, w, bounds, groups):
 
 
 @st.cache_data(show_spinner=False, max_entries=20)
-def _cached_frontier(mu: pd.Series, sigma: pd.DataFrame, bounds: tuple, groups: tuple) -> pd.DataFrame:
+def _cached_frontier(mu: pd.Series, sigma: pd.DataFrame, bounds: tuple, groups: tuple, max_target=None) -> pd.DataFrame:
     """La frontera es lo más costoso (una optimización por punto): se reutiliza mientras no cambien datos ni cotas."""
-    return efficient_frontier(mu, sigma, list(bounds), n_points=30, groups=[(list(g), c) for g, c in groups] or None)
+    return efficient_frontier(mu, sigma, list(bounds), n_points=30, groups=[(list(g), c) for g, c in groups] or None,
+                              max_target=max_target)
 
 
-def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None):
+def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None, max_target=None):
     m = lab.m
     rf = rf_per_period(rf_ea, m)
     with st.spinner("Optimizando..."):
@@ -454,13 +479,14 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None
         tangent = max_sharpe(lab.mu, lab.sigma, rf, bounds, groups=groups)
         personal = personal_optimum(lab.mu, lab.sigma, gamma, bounds, groups=groups)
         top = max_expected_return(lab.mu, bounds, lab.sigma, groups=groups)
-        frontier = _cached_frontier(lab.mu, lab.sigma, tuple(bounds), tuple((tuple(g), c) for g, c in (groups or [])))
+        frontier = _cached_frontier(lab.mu, lab.sigma, tuple(bounds), tuple((tuple(g), c) for g, c in (groups or [])), max_target)
         cloud = random_portfolios(lab.mu, lab.sigma, bounds, n=1500) if not groups else pd.DataFrame()
 
     ann_mu, ann_vol = (lambda x: x * m), (lambda x: x * np.sqrt(m))
     fig = go.Figure()
     if not cloud.empty:
-        fig.add_trace(go.Scatter(x=ann_vol(cloud["volatilidad"]), y=ann_mu(cloud["media"]), mode="markers", name="Carteras al azar (ilustrativas)",
+        fig.add_trace(go.Scatter(x=ann_vol(cloud["volatilidad"]), y=ann_mu(cloud["media"]), mode="markers",
+                                 name=cloud.attrs.get("etiqueta", "Carteras al azar (ilustrativas)"),
                                  marker=dict(size=3, color="rgba(230,230,230,0.18)"), hoverinfo="skip"))
     for branch, color, dash in (("eficiente", NEON_GREEN, None), ("no eficiente", ELECTRIC_BLUE, "dot")):
         part = frontier[(frontier["rama"] == branch) & (frontier["estado"] == "óptimo")]
@@ -479,8 +505,9 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None
         if ps.volatility > 0:
             x_max = max(ps.volatility, np.sqrt(np.diag(lab.sigma.to_numpy())).max())
             xs = np.linspace(0, x_max, 20)
-            fig.add_trace(go.Scatter(x=ann_vol(xs), y=[ann_mu(rf + (ps.mean - rf) / ps.volatility * x) for x in xs], mode="lines",
-                                     name="CML aproximada (proxy 1/N)", line=dict(color="#FF6B6B", dash="dot")))
+            label = "1/N del universo (proxy provisional del equipo)"
+            fig.add_trace(go.Scatter(x=ann_vol(xs), y=[ann_mu(cml_expected_return(rf, ps.mean, ps.volatility, x, label)) for x in xs],
+                                     mode="lines", name="CML aproximada (proxy 1/N)", line=dict(color="#FF6B6B", dash="dot")))
             fig.add_trace(go.Scatter(x=[ann_vol(ps.volatility)], y=[ann_mu(ps.mean)], mode="markers", name="Proxy de mercado (1/N)",
                                      marker=dict(size=11, symbol="x", color="#FF6B6B")))
     for res, symbol, color in ((gmv, "diamond", ELECTRIC_BLUE), (tangent, "star", STAR_GOLD),
@@ -495,6 +522,8 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None
     fig.update_layout(title="Frontera de mínima varianza calculada por optimización", xaxis_title="Volatilidad anualizada",
                       yaxis_title="Rendimiento esperado anualizado", xaxis_tickformat=".0%", yaxis_tickformat=".0%", height=520, **LAYOUT)
     st.plotly_chart(fig)
+    if frontier.empty:
+        st.warning(f"Frontera no dibujada: {frontier.attrs.get('estado', 'sin datos')}")
 
     rows = []
     for res in (gmv, tangent, personal, top):
@@ -554,13 +583,14 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None
 
 def _views_editor(assets, default_views):
     st.markdown("**Opiniones (views) del equipo.** Déjalo vacío si no hay evidencia: no se inventa convicción.")
-    cols = ["id", "tipo", "activo", "contra", "Q", "Q es", "omega", "confianza", "vence", "tesis", "fuente", "publicada",
-            "autor", "evidencia contraria"]
+    cols = ["id", "tipo", "activo", "contra", "Q", "Q es", "omega", "confianza", "conocida desde", "vence", "tesis", "fuente",
+            "publicada", "autor", "evidencia contraria"]
     df = pd.DataFrame([v + [None] * (len(cols) - len(v)) for v in default_views], columns=cols)
     df = df.astype({c: "object" for c in ["id", "tipo", "activo", "contra", "Q es", "tesis", "fuente", "autor", "evidencia contraria"]}
                    | {"Q": "float64", "omega": "float64", "confianza": "float64"})
     df["vence"] = pd.to_datetime(df["vence"])
     df["publicada"] = pd.to_datetime(df["publicada"])
+    df["conocida desde"] = pd.to_datetime(df["conocida desde"])
     edited = st.data_editor(
         df, key="lab_bl_views", num_rows="dynamic", hide_index=True,
         column_config={
@@ -572,6 +602,7 @@ def _views_editor(assets, default_views):
             "omega": st.column_config.NumberColumn("Ω varianza (opcional)", format="%.6f"),
             "confianza": st.column_config.NumberColumn("confianza 0-1 (si no hay Ω)", min_value=0.0, max_value=1.0, format="%.2f"),
             "vence": st.column_config.DateColumn("vence"),
+            "conocida desde": st.column_config.DateColumn("conocida desde", help="Antes de esta fecha la view no se usa (sin look-ahead)."),
             "publicada": st.column_config.DateColumn("publicada"),
             "autor": st.column_config.TextColumn("autor (estudiante)"),
         },
@@ -592,6 +623,21 @@ def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds, group
                             value=float(ctrl["delta"]), step=0.5, key="lab_bl_delta")
     tau = c2.number_input("τ (incertidumbre del prior)", min_value=0.001, value=float(ctrl["tau"]), step=0.01, format="%.3f", key="lab_bl_tau")
     c3.metric("rf del periodo", f"{rf:.6f}")
+    _explain("¿Qué significan δ, τ, w_ref, Q, Ω y la confianza? ¿Qué pongo?", """
+- **δ (delta):** aversión al riesgo **implícita del mercado de referencia**. Con ella se calcula el prior π = δ·Σ·w_ref.
+  Se suele calibrar como (rendimiento esperado del mercado − rf) / varianza del mercado; valores típicos entre 2 y 4.
+  No es la γ del inversionista.
+- **τ (tau):** cuánta incertidumbre hay sobre el prior. Valores habituales entre 0,01 y 0,10; más alto = las views pesan más.
+- **w_ref:** la cartera "de equilibrio" de referencia: pesos por capitalización de mercado o una referencia estratégica
+  documentada. Un universo pequeño no es "el mercado": justifiquen la elección.
+- **Q:** la magnitud de la opinión, en decimal y en la **misma frecuencia** de los datos (0,01 = 1 %). Si la escriben como
+  rendimiento **total**, márquenlo "total" y la app resta rf.
+- **Ω (omega):** varianza de la opinión. Pequeña = mucha seguridad; grande = la view casi no cuenta. Si no la conocen,
+  usen **confianza** entre 0 y 1 y la app calcula Ω de forma proporcional. Confianza 0 excluye la view.
+- **Conocida desde / vence:** desde cuándo existía la información y hasta cuándo rige. Antes de "conocida desde" no se usa
+  (sin mirar el futuro) y después de "vence" se retira.
+- **Fuente, publicada, autor, evidencia contraria:** el registro que pide la guía para cada view; la app avisa si falta.
+""")
 
     st.markdown("**Cartera de referencia w_ref** (capitalización o referencia estratégica documentada — decisión del equipo):")
     ref_default = pd.Series(ctrl["w_ref"], index=ctrl["assets"]) if is_control else pd.Series(1 / len(assets), index=assets)
@@ -605,8 +651,8 @@ def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds, group
     if is_control:
         Q, Om = ctrl["Q"], ctrl["Omega"]
         default_views = [
-            ["V1", "absoluta", "A", None, Q[0], "exceso", Om[0][0], None, None, ctrl["descripcion"][0]],
-            ["V2", "relativa", "A", "B", Q[1], "exceso", Om[1][1], None, None, ctrl["descripcion"][1]],
+            ["V1", "absoluta", "A", None, Q[0], "exceso", Om[0][0], None, None, None, ctrl["descripcion"][0]],
+            ["V2", "relativa", "A", "B", Q[1], "exceso", Om[1][1], None, None, None, ctrl["descripcion"][1]],
         ]
     else:
         default_views = []
@@ -628,8 +674,10 @@ def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds, group
         conf = None if pd.isna(r.get("confianza")) else float(r["confianza"])
         exp = r.get("vence")
         exp = None if exp is None or pd.isna(exp) else pd.Timestamp(exp).date()
+        known = r.get("conocida desde")
+        known = None if known is None or pd.isna(known) else pd.Timestamp(known).date()
         views.append(View(str(r["id"]), p_row, q, omega=omega, confidence=conf, expires_at=exp, thesis=str(r.get("tesis") or ""),
-                          author="" if pd.isna(r.get("autor")) else str(r.get("autor"))))
+                          author="" if pd.isna(r.get("autor")) else str(r.get("autor")), known_at=known))
     incomplete = [str(r["id"]) for _, r in edited.dropna(subset=["id", "activo", "Q"]).iterrows()
                   if any(pd.isna(r.get(c)) or str(r.get(c)).strip() == "" for c in ("fuente", "publicada", "autor", "evidencia contraria"))]
     if incomplete and not is_control:
@@ -656,6 +704,8 @@ def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds, group
         st.caption("Residual P·μ_BL − Q por view (anual): " + ", ".join(f"{k}: {v * m:+.2%}" for k, v in res.view_residuals.items()))
 
     st.session_state["lab_view_ids"] = list(vs.used)
+    st.session_state["lab_views"] = views  # para el rebalanceo y el backtest (cada una se usa solo mientras rige)
+    st.session_state["lab_bl_params"] = {"delta": delta, "tau": tau, "w_ref": w_ref}
 
     def opt(mu_excess, sigma, label):
         return personal_optimum(mu_excess + rf, sigma, gamma, bounds, groups=groups), label
@@ -726,13 +776,25 @@ def _tab_rebalance(lab: LabData, gamma: float, bounds, groups=None):
         "precio nuevo": ctrl["precios_nuevos"], "peso objetivo": ctrl["pesos_objetivo"],
     })
     edited = st.data_editor(base, key="lab_reb_book", num_rows="dynamic", hide_index=True)
-    c1, c2, c3, c4 = st.columns(4)
-    cash = c1.number_input("Caja inicial", value=float(ctrl["caja"]), step=100.0, key="lab_reb_cash")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    cash = c1.number_input("Caja inicial", value=float(ctrl["caja"]), step=100.0, key="lab_reb_cash",
+                           help="Efectivo disponible antes de operar.")
     cost = c2.number_input("Costo por nominal negociado", value=float(ctrl["costo_por_nominal"]), min_value=0.0, step=0.0005,
-                           format="%.4f", key="lab_reb_cost")
+                           format="%.4f", key="lab_reb_cost", help="Comisión como fracción de cada compra o venta (0,001 = 0,1 %).")
     band = c3.number_input("Banda de no operación (deriva máx.)", value=0.05, min_value=0.0, max_value=1.0, step=0.01,
                            format="%.2f", key="lab_reb_band", help="Valor de ejemplo: la banda es decisión del equipo.")
-    fractional = c4.toggle("Fracciones de unidad", value=bool(ctrl["fracciones"]), key="lab_reb_frac")
+    cash_min = c4.number_input("Caja mínima", value=0.0, min_value=0.0, step=50.0, key="lab_reb_cashmin",
+                               help="Efectivo que siempre se deja aparte; los pesos objetivo se aplican al resto.")
+    fractional = c5.toggle("Fracciones de unidad", value=bool(ctrl["fracciones"]), key="lab_reb_frac")
+    _explain("¿Qué significa cada parámetro del rebalanceo y qué pongo?", """
+- **Cantidades y precios:** la cartera que tienen hoy y los precios de antes y de ahora. Con eso se ve cuánto **derivaron** los pesos.
+- **Peso objetivo:** a dónde quieren volver (por ejemplo, la cartera elegida en Markowitz o en Black-Litterman).
+- **Costo por nominal:** comisión de su bróker como fracción de lo negociado (0,001 = 0,1 %). Se cobra en cada compra y venta.
+- **Banda de no operación:** si ningún peso se aleja del objetivo más que esto, **no se opera** (evita pagar costos por
+  movimientos pequeños). Típico: entre 2 % y 10 %.
+- **Caja mínima:** efectivo que siempre se conserva (para gastos, retiros o margen); los pesos se aplican al resto.
+- **Fracciones de unidad:** si se pueden comprar fracciones de acción. Si no, se redondea hacia abajo y sobra caja.
+""")
     edited = edited.dropna(subset=["activo"])
     if edited.empty:
         return
@@ -758,7 +820,7 @@ def _tab_rebalance(lab: LabData, gamma: float, bounds, groups=None):
         st.info(f"La deriva ({drift:.2%}) está dentro de la banda ({band:.2%}): la política indica **no operar**. "
                 "Abstenerse es una decisión válida y queda registrada.")
     try:
-        plan = plan_rebalance(book, p1, target, cost, fractional=fractional)
+        plan = plan_rebalance(book, p1, target, cost, fractional=fractional, cash_minimum=cash_min)
     except ValueError as exc:
         st.error(str(exc))
         return
@@ -778,7 +840,7 @@ def _tab_rebalance(lab: LabData, gamma: float, bounds, groups=None):
                "La comparación de estrategias en el tiempo está en la pestaña «Backtest».")
 
     if lab.returns is not None and len(lab.returns) > 60:
-        _policy_simulation(lab, gamma, bounds, groups, cost, band)
+        _policy_simulation(lab, gamma, bounds, groups, cost, band, cash_min)
 
     _explain("¿Qué significa rebalancear y cómo se decide?", """
 - **Deriva:** si no haces nada, los pesos cambian solos porque cada activo rinde distinto: w_nuevo = w_anterior·(1+R_i)/(1+R_p).
@@ -794,58 +856,77 @@ def _tab_rebalance(lab: LabData, gamma: float, bounds, groups=None):
 """)
 
 
-def _policy_simulation(lab: LabData, gamma, bounds, groups, cost, band):
-    st.markdown("#### Simular la política en el tiempo (libro de eventos)")
-    st.caption("Cada periodo de la serie es un evento de precio. La política decide si opera, se abstiene o suspende; "
-               "todo queda registrado. Los parámetros son decisión del equipo (los valores son ejemplos).")
+def _policy_simulation(lab: LabData, gamma, bounds, groups, cost, band, cash_min):
+    st.markdown("#### Simular la política en el tiempo (con reestimación y libro de eventos)")
+    st.caption("Cada periodo es un evento de precio; el vencimiento o la entrada en vigencia de una view registrada en "
+               "Black-Litterman es un evento de información. En cada decisión se reestiman μ y Σ SOLO con la ventana "
+               "conocida en esa fecha. Los parámetros son decisión del equipo (los valores iniciales son ejemplos).")
     n_total = len(lab.returns)
     c1, c2, c3, c4 = st.columns(4)
-    horizon = c1.number_input("Periodos a simular (los últimos)", min_value=20, max_value=n_total - 20,
-                              value=min(250, n_total // 2), step=10, key="lab_pol_h")
-    every = c2.number_input("Regla periódica: cada (días, 0 = no)", min_value=0, value=30, step=5, key="lab_pol_days")
-    wait = c3.number_input("Espera mínima entre operaciones (días)", min_value=0, value=5, step=1, key="lab_pol_wait")
-    max_turn = c4.number_input("Rotación máxima por decisión (0 = sin tope)", min_value=0.0, value=0.0, step=0.05,
+    window = c1.number_input("Ventana de estimación (obs.)", min_value=len(lab.mu) + 5, max_value=max(n_total // 2, len(lab.mu) + 6),
+                             value=min(120, max(n_total // 2, len(lab.mu) + 6)), step=10, key="lab_pol_window")
+    horizon = c2.number_input("Periodos a simular (los últimos)", min_value=10, max_value=max(n_total - int(window) - 1, 11),
+                              value=min(250, max(n_total - int(window) - 1, 11)), step=10, key="lab_pol_h")
+    every = c3.number_input("Regla periódica: cada (días, 0 = no)", min_value=0, value=30, step=5, key="lab_pol_days")
+    wait = c4.number_input("Espera mínima entre operaciones (días)", min_value=0, value=5, step=1, key="lab_pol_wait")
+    c1, c2, c3 = st.columns(3)
+    max_turn = c1.number_input("Rotación máxima por decisión (0 = sin tope)", min_value=0.0, value=0.0, step=0.05,
                                format="%.2f", key="lab_pol_turn")
-    target_kind = st.radio("Pesos objetivo", ["1/N", "Mínima varianza", "Óptimo personal (γ)"], horizontal=True, key="lab_pol_target")
-
-    sim = lab.returns.iloc[-int(horizon):]
-    est = lab.returns.iloc[: -int(horizon)]  # se estima ANTES de simular: sin mirar el tramo simulado
-    assets = list(lab.returns.columns)
-    if target_kind == "1/N":
-        target = pd.Series(1 / len(assets), index=assets)
-    else:
-        mu_e, sig_e = est.mean(), covariance_matrix(est)
-        res = (min_variance(mu_e, sig_e, bounds, groups=groups) if target_kind == "Mínima varianza"
-               else personal_optimum(mu_e, sig_e, gamma, bounds, groups=groups))
-        if not res.ok:
-            st.error(f"No se pudo calcular el objetivo: {res.status}. {res.message}")
-            return
-        target = res.weights
-    prices = 100 * (1 + sim).cumprod()
-    capital = 10_000.0
-    p0 = prices.iloc[0]
-    book = Book(quantities=target * capital / p0, cash=0.0)
+    use_cb = c2.toggle("Regla costo-beneficio (P85)", value=False, key="lab_pol_cb",
+                       help="No operar si la mejora de utilidad estimada no supera los costos más un margen.")
+    margin = c3.number_input("Margen costo-beneficio (utilidad por periodo)", value=0.0, step=0.0001, format="%.5f",
+                             key="lab_pol_margin", disabled=not use_cb)
+    info_events = st.toggle("Las views que vencen o entran en vigencia disparan revisión", value=True, key="lab_pol_info")
+    rule = st.radio("Objetivo recalculado en cada decisión", ["1/N", "GMV", "Óptimo personal", "BL posterior"], horizontal=True,
+                    key="lab_pol_target")
+    _explain("¿Qué significa cada regla de la política?", """
+- **Ventana de estimación:** cuántas observaciones pasadas se usan para estimar μ y Σ en cada decisión.
+- **Regla periódica:** revisar cada X días aunque nada haya cambiado. **Banda:** revisar si la deriva supera la banda (arriba).
+- **Espera mínima:** días que deben pasar entre operaciones, para no operar de más.
+- **Rotación máxima:** si una operación movería más que este porcentaje de la cartera, se abstiene.
+- **Costo-beneficio (P85):** compara la mejora de utilidad U = w'μ − (γ/2)·w'Σw de ir al nuevo objetivo contra el costo de
+  operar; si la mejora menos el costo no supera el margen, no se opera.
+- **Eventos de información:** cuando una view registrada vence o empieza a regir, se revisa la cartera.
+- **Objetivo:** 1/N, mínima varianza, óptimo personal con γ, o Black-Litterman con las views vigentes en esa fecha.
+- **Duplicados:** un evento repetido no genera otra decisión; queda en el libro como "duplicado, sin decisión".
+""")
+    views = st.session_state.get("lab_views", []) if rule == "BL posterior" else []
+    bl = st.session_state.get("lab_bl_params", {})
+    w_ref = bl.get("w_ref")
+    if w_ref is not None and list(w_ref.index) != list(lab.returns.columns):
+        w_ref = None
     policy = RebalancePolicy(cost_rate=cost, weight_band=band if band > 0 else None, calendar_days=int(every) or None,
-                             min_days_between=int(wait), max_turnover=max_turn or None)
-    reb = Rebalancer(policy=policy, book=book, target_weights=target, last_trade_at=pd.Timestamp(prices.index[0]).to_pydatetime())
-    for when, row in prices.iloc[1:].iterrows():
-        reb.on_event(MarketEvent(f"precio-{pd.Timestamp(when).date()}", pd.Timestamp(when).to_pydatetime(), row))
-    log = pd.DataFrame([{"evento": d.event_id, "acción": d.action, "motivo": d.reason,
-                         "costos": d.plan.costs if d.plan and d.action == ACTION_REBALANCE else 0.0,
-                         "rotación": d.plan.turnover if d.plan and d.action == ACTION_REBALANCE else 0.0} for d in reb.log])
-    hold_equity = float((book.quantities * prices.iloc[-1]).sum())
-    final_equity = reb.book.equity(prices.iloc[-1])
+                             min_days_between=int(wait), max_turnover=max_turn or None, cash_minimum=cash_min,
+                             information_events=info_events, cost_benefit_margin=margin if use_cb else None)
+    try:
+        run = simulate_policy(lab.returns, policy, rule=rule, window=int(window), horizon=int(horizon), gamma=gamma,
+                              bounds=bounds, groups=groups, views=views, bl_delta=bl.get("delta", 3.0),
+                              bl_tau=bl.get("tau", 0.05), rf_period=0.0, w_ref=w_ref)
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+    log = pd.DataFrame([{
+        "evento": d.event_id, "acción": d.action, "disparador": d.trigger, "motivo": d.reason,
+        "ventana": f"{pd.Timestamp(d.window[0]).date()} a {pd.Timestamp(d.window[1]).date()}" if d.window else "",
+        "pesos teóricos": ", ".join(f"{k} {v:.0%}" for k, v in d.theoretical.items()) if d.theoretical is not None else "",
+        "pesos realizados": ", ".join(f"{k} {v:.0%}" for k, v in d.realized.items()) if d.realized is not None else "",
+        "costos": d.plan.costs if d.plan is not None and d.action == ACTION_REBALANCE else 0.0,
+    } for d in run.log])
     trades = log[log["acción"] == ACTION_REBALANCE]
     st.session_state["lab_rebalance_ids"] = trades["evento"].tolist()
+    st.session_state["lab_trigger_ids"] = [d.event_id for d in run.log if d.action == ACTION_REBALANCE and d.event_id.startswith("view-")]
+    last_prices = run.prices.iloc[-1]
+    hold = run.initial_book.equity(last_prices)
+    final = run.rebalancer.book.equity(last_prices)
     a, b, c, d = st.columns(4)
     a.metric("Operaciones", len(trades))
-    b.metric("Abstenciones / suspensiones", f"{(log['acción'] != ACTION_REBALANCE).sum()}")
+    b.metric("Abstenciones / suspensiones / duplicados", f"{(log['acción'] != ACTION_REBALANCE).sum()}")
     c.metric("Costos totales", f"{trades['costos'].sum():,.2f}")
-    d.metric("Patrimonio final vs. no operar", f"{final_equity:,.0f}", delta=f"{final_equity - hold_equity:,.0f}")
-    with st.expander("Ver el libro de eventos completo"):
-        st.dataframe(log.style.format({"costos": "{:,.2f}", "rotación": "{:.2%}"}), hide_index=True)
-    st.caption(f"Capital inicial {capital:,.0f}, comprado a los pesos objetivo en {pd.Timestamp(prices.index[0]).date()} "
-               "(sin costo, base común). El objetivo se estima con datos anteriores al tramo simulado.")
+    d.metric("Patrimonio final vs. no operar", f"{final:,.0f}", delta=f"{final - hold:,.0f}")
+    with st.expander("Ver el libro de eventos completo (ventana, pesos teóricos y realizados, motivo)"):
+        st.dataframe(log.style.format({"costos": "{:,.2f}"}), hide_index=True)
+    st.caption(f"Capital inicial 10.000 comprado a los pesos objetivo del {pd.Timestamp(run.prices.index[0]).date()} "
+               "(sin costo, base común). Precios reconstruidos con los rendimientos de la muestra.")
 
 
 def _tab_backtest(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None):
@@ -863,14 +944,42 @@ def _tab_backtest(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None)
     cost = c3.number_input("Costo por nominal negociado", min_value=0.0, value=0.001, step=0.0005, format="%.4f", key="lab_bt_cost")
     share = c4.slider("Fracción para validación", 0.2, 0.8, 0.5, 0.05, key="lab_bt_share")
     strategies = st.multiselect("Estrategias", ALL_STRATEGIES, default=ALL_STRATEGIES, key="lab_bt_strats")
-    if not strategies:
+    c1, c2, c3 = st.columns([2, 1, 1])
+    estimators = c1.multiselect("Estimadores de Σ a comparar (candidatos del equipo)", ESTIMATORS, default=["muestral"],
+                                key="lab_bt_estimators")
+    lam = c2.number_input("λ de EWMA", value=0.94, min_value=0.5, max_value=0.999, step=0.01, format="%.3f", key="lab_bt_lambda")
+    criterion = c3.selectbox("Criterio de selección en validación", ["Sharpe anual", "rendimiento anual (CAGR)", "máximo drawdown"],
+                             key="lab_bt_criterion")
+    views = st.session_state.get("lab_views", [])
+    bl = st.session_state.get("lab_bl_params", {})
+    w_ref = bl.get("w_ref")
+    if w_ref is not None and list(w_ref.index) != list(lab.returns.columns):
+        w_ref = None
+    st.caption(f"Black-Litterman usará {len(views)} view(s) registrada(s) en su pestaña, cada una solo entre su fecha "
+               "«conocida desde» y su vencimiento." if views else
+               "Sin views registradas: Black-Litterman usa solo el prior (con γ = δ y w_ref = 1/N coincide con 1/N, y se rotula así).")
+    _explain("¿Qué significa cada parámetro del backtest y qué pongo?", """
+- **Ventana de estimación:** cuántas observaciones pasadas usa cada decisión. Corta = reacciona rápido pero es ruidosa;
+  larga = estable pero lenta.
+- **Rebalancear cada:** cada cuántos periodos se recalculan los pesos (21 días ≈ un mes de negociación).
+- **Costo por nominal:** comisión sobre lo negociado; castiga a las estrategias que rotan mucho.
+- **Fracción para validación:** qué parte del periodo evaluado se usa para **elegir** (validación). El resto es la
+  **prueba final**, que solo se mira después de elegir.
+- **Estimadores de Σ:** muestral, Ledoit-Wolf (encogido) o EWMA (más peso a lo reciente). Cada combinación
+  estrategia × estimador es un candidato.
+- **Criterio de selección:** con qué métrica se elige el candidato en validación (el drawdown se elige el menos negativo).
+""")
+    if not strategies or not estimators:
         return
     if st.button("Ejecutar backtest", key="lab_bt_run", type="primary"):
         cfg = BacktestConfig(window=int(window), rebalance_every=int(every), cost_rate=cost, rf_period=rf_per_period(rf_ea, lab.m),
-                             gamma=gamma, bounds=bounds, periods_per_year=lab.m, validation_share=share, groups=groups)
+                             gamma=gamma, bounds=bounds, periods_per_year=lab.m, validation_share=share, groups=groups,
+                             ewma_lambda=lam, views=views or None, bl_delta=bl.get("delta", 3.0), bl_tau=bl.get("tau", 0.05),
+                             w_ref=w_ref)
         with st.spinner("Simulando..."):
             try:
-                st.session_state["lab_bt_result"] = (walk_forward(lab.returns, cfg, strategies), tuple(lab.returns.columns))
+                st.session_state["lab_bt_result"] = (walk_forward(lab.returns, cfg, strategies, estimators),
+                                                     tuple(lab.returns.columns))
             except ValueError as exc:
                 st.error(str(exc))
                 return
@@ -889,6 +998,16 @@ def _tab_backtest(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None)
     pct_cols = ["rendimiento anual (CAGR)", "volatilidad anual", "máximo drawdown", "rendimiento acumulado",
                 "rotación media por decisión", "costos totales", "cambio medio de pesos objetivo"]
     st.dataframe(res.metrics.style.format({c: "{:.2%}" for c in pct_cols} | {"Sharpe anual": "{:.2f}"}, na_rep="—"))
+    try:
+        pick = select_by_validation(res, criterion=criterion, higher_is_better=True)
+        st.success(f"**Elegido en validación ({criterion}):** {pick.chosen}. {pick.note}")
+        sel = pd.DataFrame({"validación": pick.validation_metrics, "prueba final (sin reajustar)": pick.test_metrics}).loc[
+            ["rendimiento anual (CAGR)", "volatilidad anual", "Sharpe anual", "máximo drawdown"]]
+        st.dataframe(sel.style.format("{:.2%}", subset=pd.IndexSlice[["rendimiento anual (CAGR)", "volatilidad anual", "máximo drawdown"], :])
+                     .format("{:.2f}", subset=pd.IndexSlice[["Sharpe anual"], :]))
+    except ValueError as exc:
+        st.warning(str(exc))
+    _explain("¿Qué significa cada indicador?", INDICATORS_HELP)
     for name, run in res.runs.items():
         if run.failures:
             st.warning(f"{name}: {len(run.failures)} fecha(s) sin solución del optimizador; se conservó la cartera anterior. "
@@ -930,33 +1049,102 @@ def _tab_capm(lab: LabData):
         ["Ke COP (paridad de inflación)", _pct(ke_cop), f"(1+Ke_USD)(1+{params['inflacion_COL']:.1%})/(1+{params['inflacion_USA']:.1%}) − 1"],
     ], columns=["concepto", "valor", "detalle"]), hide_index=True)
 
-    st.markdown("**WACC y valoración (DCF)**")
+    st.markdown("#### Proyección y valoración del caso (5 años)")
+    st.info("ℹ️ **Pendiente de confirmar:** la regla del caso que usa `capacidad_ventas` y `capex_venta_adicional` para "
+            "calcular el CAPEX y la depreciación está en el PDF del caso, que no está en el repositorio. Mientras el "
+            "equipo la confirma, el CAPEX y la depreciación de cada año se escriben a mano en la tabla.")
+    _explain("¿Qué significa cada entrada de la valoración y qué pongo?", """
+- **Crecimiento de ventas:** cuánto cambian las ventas cada año (0,05 = 5 %). Es un supuesto del equipo: debe salir del
+  análisis del negocio (mercado, precios, capacidad).
+- **Costo variable %:** costo variable como fracción de las ventas (el caso parte de 60 %). Cambiarlo es cambiar el margen.
+- **Gastos fijos:** gastos que no dependen de las ventas (el caso parte de 33.000 millones).
+- **CAPEX y depreciación:** inversión en activos fijos y su gasto contable por año. CAPEX igual a la depreciación solo
+  repone; para crecer hay que invertir más.
+- **Deuda:** saldo de deuda financiera al cierre de cada año (el caso parte de 45.000). Afecta intereses, FCFE y el covenant.
+- **Kd:** costo de la deuda (13,5 % en el caso; el equipo debe confirmar que está en COP).
+- **D/E:** deuda/patrimonio para los pesos del WACC (0,75 en el caso). Con "iterar D/E" la app lo hace coherente con el
+  patrimonio estimado.
+- **g terminal:** crecimiento perpetuo después del año 5; debe ser menor que el WACC y que Ke, y coherente con la
+  reinversión (g = reinversión × ROIC).
+- **Escenarios:** choque del tipo de cambio sobre los insumos importados, rezago de días para trasladar ese costo a
+  precios (el caso menciona 60 días) y cambio de la tasa de la deuda. Las magnitudes son del equipo.
+""")
     c1, c2, c3 = st.columns(3)
     kd = c1.number_input("Kd efectiva anual", value=float(params["kd_EA"]), step=0.005, format="%.4f", key="lab_val_kd",
                          help="Del caso: 13,5 %. El equipo debe confirmar que está en COP, igual que los flujos.")
     de = c2.number_input("D/E para los pesos del WACC", value=float(params["de_empresa"]), step=0.05, key="lab_val_de")
     g = c3.number_input("g terminal (nominal COP)", value=float(params["g_terminal"]), step=0.005, format="%.4f", key="lab_val_g")
-    w = wacc(ke_cop, kd, params["tax_supuesto"], de)
-    st.metric("WACC (COP)", _pct(w), help="E/(D+E)·Ke_COP + D/(D+E)·Kd·(1−t)")
 
-    st.warning("⚠️ **Proyección pendiente del equipo.** La tabla parte del año 0 del caso repetido sin crecimiento solo para "
-               "que el cálculo corra. Reemplácenla con su proyección de 5 años (ventas, márgenes, CAPEX y capital de trabajo).")
-    proj = pd.DataFrame({"año": [1, 2, 3, 4, 5], "EBIT": [params["ebit0"]] * 5, "D&A": [params["depreciacion0"]] * 5,
-                         "CAPEX": [params["depreciacion0"]] * 5, "ΔNWC": [0.0] * 5})
-    proj = st.data_editor(proj, key="lab_val_proj", hide_index=True, disabled=["año"])
-    flows = [fcff(e, params["tax_supuesto"], d, c, n) for e, d, c, n in proj[["EBIT", "D&A", "CAPEX", "ΔNWC"]].to_numpy()]
+    st.markdown("**Supuestos por año (entradas del equipo; los valores iniciales repiten el año 0 del caso)**")
+    years = [1, 2, 3, 4, 5]
+    inputs = pd.DataFrame({
+        "año": years, "crecimiento ventas": [0.0] * 5, "costo variable %": [params["costo_variable"]] * 5,
+        "gastos fijos": [float(params["gastos_fijos"])] * 5, "CAPEX": [float(params["depreciacion0"])] * 5,
+        "depreciación": [float(params["depreciacion0"])] * 5, "deuda": [float(params["deuda_financiera"])] * 5,
+    })
+    inputs = st.data_editor(inputs, key="lab_val_inputs", hide_index=True, disabled=["año"],
+                            column_config={"crecimiento ventas": st.column_config.NumberColumn(format="%.4f"),
+                                           "costo variable %": st.column_config.NumberColumn(format="%.4f")})
+    st.markdown("**Escenarios (magnitudes del equipo; 0 = sin escenario)**")
+    c1, c2, c3, c4 = st.columns(4)
+    fx = c1.number_input("Choque FX sobre insumos", value=0.0, step=0.05, format="%.2f", key="lab_val_fx",
+                         help="0,20 = el dólar sube 20 % y encarece la parte importada del costo variable.")
+    share = c2.number_input("Participación importada del costo", value=0.0, min_value=0.0, max_value=1.0, step=0.05,
+                            format="%.2f", key="lab_val_share")
+    lag = c3.number_input("Rezago para trasladar a precios (días)", value=60, min_value=0, max_value=365, step=15,
+                          key="lab_val_lag", help="El caso menciona un rezago de 60 días en el margen.")
+    kd_shift = c4.number_input("Cambio de Kd (tasa variable)", value=0.0, step=0.005, format="%.4f", key="lab_val_kdshift")
+    scenario = Scenario(fx_shock=fx, imported_share=share, pass_through_lag_days=lag, kd_shift=kd_shift)
     try:
-        dcf = discounted_cash_flow(flows, w, g)
+        proj = project(params, inputs["crecimiento ventas"].astype(float).tolist(), inputs["CAPEX"].astype(float).tolist(),
+                       inputs["depreciación"].astype(float).tolist(), variable_cost=inputs["costo variable %"].astype(float).tolist(),
+                       fixed_costs=inputs["gastos fijos"].astype(float).tolist(), debt=inputs["deuda"].astype(float).tolist(),
+                       scenario=scenario)
     except ValueError as exc:
         st.error(str(exc))
         return
+    st.caption(f"Control: el año 0 reproduce EBIT₀ = {proj.table.loc[0, 'EBIT']:,.0f} (el caso dice {params['ebit0']:,.0f}).")
+    show = ["ventas", "EBIT", "EBITDA", "NOPAT", "ΔNWC", "CAPEX", "FCFF", "intereses", "utilidad neta", "FCFE", "deuda/EBITDA"]
+    st.dataframe(proj.table[show].style.format("{:,.0f}", subset=[c for c in show if c != "deuda/EBITDA"])
+                 .format("{:.2f}", subset=["deuda/EBITDA"]))
+    for note in proj.notes:
+        st.error(note)
+
+    kd_eff = kd + kd_shift
+    w = wacc(ke_cop, kd_eff, params["tax_supuesto"], de)
     c1, c2, c3 = st.columns(3)
-    c1.metric("Valor de la empresa (EV)", f"{dcf.enterprise_value:,.0f}")
-    c2.metric("Peso del valor terminal", _pct(dcf.terminal_share))
-    c3.metric("Patrimonio (EV − deuda financiera)", f"{equity_value(dcf.enterprise_value, 0, 0, params['deuda_financiera']):,.0f}",
-              help="Sin caja excedente ni activos no operativos (no vienen en los datos del caso cargados).")
-    st.caption("COP millones. FCFF = EBIT·(1−t) + D&A − CAPEX − ΔNWC; TV = FCFF₆/(WACC − g) con FCFF₆ = FCFF₅·(1+g).")
+    c1.metric("WACC (COP)", _pct(w), help="E/(D+E)·Ke_COP + D/(D+E)·Kd·(1−t)")
+    try:
+        val = value_firm(proj, w, ke_cop, g)
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+    c2.metric("Valor de la empresa (EV)", f"{val.enterprise_value:,.0f}")
+    c3.metric("Peso del valor terminal", _pct(val.terminal_share))
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Patrimonio por FCFF (EV − deuda)", f"{val.equity_fcff:,.0f}")
+    c2.metric("Patrimonio por FCFE a Ke", f"{val.equity_fcfe:,.0f}")
+    c3.metric("Diferencia (FCFE − FCFF)", f"{val.difference:,.0f}")
+    st.caption("COP millones. " + val.explanation)
+
+    gap = budget_target(proj, ke_cop, params["patrimonio_libros"])
+    st.markdown(f"**Meta presupuestal (P113-P114):** Ke × patrimonio en libros = {ke_cop:.2%} × {params['patrimonio_libros']:,.0f} "
+                f"= **{gap.required_net_income:,.0f}** de utilidad neta, que exige un EBIT de {gap.required_ebit:,.0f} en el año 1. "
+                "Es una meta contable del caso, no la rentabilidad exigida de mercado.")
+    st.dataframe(gap.gap_by_year.rename("brecha de EBIT (requerido − proyectado)").to_frame().T.style.format("{:,.0f}"))
+
+    if st.toggle("Iterar D/E con el patrimonio estimado (P108, P119)", value=False, key="lab_val_iterate"):
+        try:
+            steps = iterate_capital_structure(params, proj, beta_u, g, start_de=de)
+            st.dataframe(pd.DataFrame([vars(x) for x in steps]).style.format(
+                {"debt_to_equity": "{:.4f}", "beta_levered": "{:.4f}", "ke_cop": "{:.2%}", "wacc": "{:.2%}", "equity": "{:,.0f}"}),
+                hide_index=True)
+            st.caption("Cada iteración: D/E = deuda / patrimonio estimado → se reapalanca β → Ke y WACC nuevos → se revalora.")
+        except ValueError as exc:
+            st.error(str(exc))
+
     grid = {}
+    flows = proj.table.loc[1:, "FCFF"].tolist()
     for dg in (-0.01, -0.005, 0.0, 0.005, 0.01):
         col = {}
         for dw in (-0.02, -0.01, 0.0, 0.01, 0.02):
@@ -968,12 +1156,11 @@ def _tab_capm(lab: LabData):
     with st.expander("Sensibilidad del valor de la empresa (EV) a WACC y g"):
         st.dataframe(pd.DataFrame(grid).style.format("{:,.0f}", na_rep="WACC ≤ g"))
         st.caption("Si el EV cambia mucho con pequeños cambios de WACC o g, la conclusión depende de esos supuestos.")
-    roic = st.number_input("ROIC estable para revisar la reinversión (opcional, decisión del equipo)", value=0.0, step=0.01,
+    roic = st.number_input("ROIC estable para revisar la reinversión (decisión del equipo; 0 = no revisar)", value=0.0, step=0.01,
                            format="%.3f", key="lab_val_roic")
     if roic > 0:
-        need = stable_reinvestment_rate(g, roic)
-        st.info(f"Crecer al {g:.2%} con ROIC {roic:.2%} exige reinvertir {need:.1%} del NOPAT cada año. "
-                "Si la proyección no lo hace, el crecimiento terminal no es coherente.")
+        chk = reinvestment_check(proj, g, roic)
+        (st.success if chk.consistent else st.warning)(chk.message)
 
     if lab.source == SOURCE_MARKET and lab.returns is not None:
         st.markdown("#### Beta de los activos frente a un benchmark")
@@ -1023,6 +1210,29 @@ def _tab_capm(lab: LabData):
 """)
 
 
+def _trace_context(lab: LabData) -> dict:
+    """Campos de la plantilla de trazabilidad con valores reales del dato (o None, que la traza explica)."""
+    ctx = {"frequency": lab.frequency or ("anual (parámetros dados)" if lab.m == 1 else None)}
+    if lab.source == SOURCE_MARKET:
+        result = st.session_state.get("comparison_result")
+        ctx.update(currency=getattr(result, "base_currency", None),
+                   source_fields=["Close con auto_adjust=True (cierre ajustado por dividendos y splits)"])
+    elif lab.source == SOURCE_SYNTH:
+        ctx.update(source_fields=["paquete_v2/data/precios_sinteticos_20.csv (columnas SIM1..SIM20)"])
+    if lab.returns is not None:
+        ctx.update(
+            event_at=str(pd.Timestamp(lab.last_date).date()) if lab.last_date is not None else None,
+            missing_data_rule=(f"Rendimientos simples sin rellenar huecos; los que cruzan un intervalo mayor al normal para la "
+                               f"frecuencia {lab.frequency} se anulan ({lab.gap_removed}); luego máscara común de filas completas."),
+            transformations=["orden por fecha", "pct_change(fill_method=None) por activo", "anulación de rendimientos sobre huecos",
+                             "máscara común (dropna)", "media y covarianza muestral ddof=1"],
+        )
+    triggers = st.session_state.get("lab_trigger_ids", [])
+    if triggers:
+        ctx["trigger_id"] = triggers[-1]
+    return ctx
+
+
 def _tab_export(lab: LabData, rf_ea, gamma, bounds, groups, results):
     text = snapshot_csv(lab.returns, lab.mu, lab.sigma)
     trace = build_trace(
@@ -1034,6 +1244,7 @@ def _tab_export(lab: LabData, rf_ea, gamma, bounds, groups, results):
         results=results or {}, solver=results["gmv"].solver if results else None,
         common_rows=None if lab.returns is None else len(lab.returns), rows_before_mask=lab.n_before,
         views_ids=st.session_state.get("lab_view_ids", []), rebalance_ids=st.session_state.get("lab_rebalance_ids", []),
+        **_trace_context(lab),
     )
     files = export_bundle(trace, text)
     problems = verify_bundle(files)
@@ -1112,11 +1323,39 @@ solo cambia cuando la política del equipo lo indica.
         st.markdown("**⚙️ Supuestos financieros (decisión del equipo; iniciales = caso docente de control)**")
         ctrl = _load_json("dos_activos.json")
         c1, c2, c3, c4 = st.columns(4)
-        rf_ea = c1.number_input("Tasa libre de riesgo (efectiva anual)", value=float(ctrl["rf"]), step=0.005, format="%.4f", key="lab_rf")
-        gamma = c2.number_input("γ aversión al riesgo", value=float(ctrl["gamma"]), min_value=0.1, step=0.5, key="lab_gamma")
+        rf_ea = c1.number_input("Tasa libre de riesgo (efectiva anual)", value=float(ctrl["rf"]), step=0.005, format="%.4f", key="lab_rf",
+                                help="Rendimiento de un activo sin riesgo de impago en la moneda del análisis (p. ej. un "
+                                     "bono del Tesoro a corto plazo). Se convierte a la frecuencia de los datos.")
+        gamma = c2.number_input("γ aversión al riesgo", value=float(ctrl["gamma"]), min_value=0.1, step=0.5, key="lab_gamma",
+                                help="Cuánto castiga el inversionista el riesgo. Más alto = cartera más conservadora.")
         lo = c3.number_input("Peso mínimo por activo", value=float(ctrl["bounds"][0][0]), step=0.05, format="%.2f", key="lab_lo",
-                             help="Negativo = se permiten cortos (decisión del equipo).")
-        hi = c4.number_input("Peso máximo por activo", value=float(ctrl["bounds"][0][1]), step=0.05, format="%.2f", key="lab_hi")
+                             help="0 = sin ventas en corto. Negativo = se permiten cortos hasta ese límite.")
+        hi = c4.number_input("Peso máximo por activo", value=float(ctrl["bounds"][0][1]), step=0.05, format="%.2f", key="lab_hi",
+                             help="Límite de concentración por activo. Mayor que 1 = se permite apalancamiento en ese activo.")
+        unlimited = st.toggle("Sin límites de peso (cortos y apalancamiento ilimitados)", value=False, key="lab_unlimited",
+                              help="Elimina las cotas: el máximo rendimiento deja de tener techo y la frontera necesita un tope.")
+        max_target_ea = None
+        if unlimited or lo < 0:
+            max_target_ea = st.number_input(
+                "Rendimiento objetivo máximo para dibujar la frontera (anual; decisión del equipo)", value=0.0, step=0.01,
+                format="%.4f", key="lab_max_target",
+                help="Con cortos el rendimiento esperado puede crecer sin fin; la frontera se dibuja hasta este valor. "
+                     "0 = no dibujar más allá de lo que las cotas permitan.")
+        _explain("¿Qué significa cada supuesto y qué debo poner?", """
+- **Tasa libre de riesgo (rf):** lo que rinde un activo sin riesgo de impago en la moneda del análisis, por ejemplo un
+  bono del Tesoro de EE. UU. de corto plazo si trabajan en USD, o un TES de corto plazo si trabajan en COP. Se escribe
+  como tasa **efectiva anual** (0,04 = 4 %); la app la pasa a la frecuencia de los datos con (1 + rf)^(1/m) − 1.
+- **γ (aversión al riesgo):** cuánto "duele" el riesgo al inversionista en la utilidad U = rendimiento − (γ/2)·varianza.
+  Valores típicos entre 2 (tolerante) y 10 (muy conservador). No se estima de los precios: la eligen ustedes según el mandato.
+- **Peso mínimo / máximo por activo:** reglas del mandato. Mínimo 0 = no se vende en corto; máximo 0,25 = ningún activo
+  pesa más de 25 %. Si la suma de mínimos es mayor que 1 o la de máximos menor que 1, el problema es **inviable**.
+- **Sin límites:** permite cortos y apalancamiento sin tope. Útil para comparar con la teoría, pero entonces el máximo
+  rendimiento es infinito y hay que fijar un **rendimiento objetivo máximo** para dibujar la frontera.
+- **Cotas por activo y topes por sector:** si un activo o un sector necesita un límite distinto (por ejemplo, "energía
+  máximo 30 %").
+- Los valores que aparecen al inicio son los del **caso docente de control**: sirven para reproducir el caso, no son la
+  decisión de ustedes.
+""")
         with st.expander("Cotas por activo y topes por sector (opcional)"):
             st.caption("Por defecto todos los activos usan el mínimo y máximo de arriba. Aquí se pueden cambiar por activo y "
                        "agrupar activos en sectores con un peso máximo por sector (decisión del equipo).")
@@ -1130,7 +1369,10 @@ solo cambia cuando la política del equipo lo indica.
                 cap_df = st.data_editor(pd.DataFrame({"sector": sectors, "peso máximo": [1.0] * len(sectors)}),
                                         key=f"lab_caps_{abs(hash(tuple(sectors)))}", hide_index=True, disabled=["sector"])
                 caps = dict(zip(cap_df["sector"], cap_df["peso máximo"].astype(float)))
-    bounds = [(float(r["mínimo"]), float(r["máximo"])) for _, r in per_asset.iterrows()]
+    bounds = ([(None, None)] * len(lab.mu) if unlimited
+              else [(float(r["mínimo"]), float(r["máximo"])) for _, r in per_asset.iterrows()])
+    # La frontera muestra μ anualizado como μ·m (convención aritmética): el tope anual se divide entre m.
+    max_target = max_target_ea / lab.m if max_target_ea else None
     groups = [([a for a, sec in zip(per_asset["activo"], per_asset["sector"]) if str(sec).strip() == name], cap)
               for name, cap in caps.items() if cap < 1.0] or None
 
@@ -1142,7 +1384,7 @@ solo cambia cuando la política del equipo lo indica.
     with tabs[1]:
         _tab_stress(lab, w_test, bounds, groups)
     with tabs[2]:
-        results = _tab_markowitz(lab, rf_ea, gamma, bounds, groups)
+        results = _tab_markowitz(lab, rf_ea, gamma, bounds, groups, max_target)
     with tabs[3]:
         _tab_black_litterman(lab, rf_ea, gamma, bounds, groups)
     with tabs[4]:
