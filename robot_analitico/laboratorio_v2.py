@@ -175,13 +175,118 @@ INDICATORS_HELP = """
 """
 
 
+# Pestañas del laboratorio como botones en cuadrícula con borde dorado. Apunta a clases
+# internas de Streamlit (st-key-*, data-testid) y puede requerir ajuste si cambia la versión.
+LAB_NAV_CSS = """
+<style>
+.st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.7rem;
+    border: none; box-shadow: none; margin-bottom: 1rem; overflow: visible;
+}
+.st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"] {
+    height: auto; min-height: 3.4rem; padding: 0.75rem 0.9rem; justify-content: center; text-align: center;
+    border: 1px solid rgba(235, 195, 94, 0.55); border-radius: 12px;
+    background: linear-gradient(180deg, rgba(235, 195, 94, 0.08), rgba(235, 195, 94, 0.02));
+    transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"]:hover {
+    background: rgba(235, 195, 94, 0.16); transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(235, 195, 94, 0.15);
+}
+.st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"] p {
+    font-size: 0.98rem; font-weight: 700; color: #E9D9A8; white-space: normal;
+}
+.st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"][aria-selected="true"] {
+    background: linear-gradient(180deg, #F2CF6E, #D9AE45); border-color: #F2CF6E;
+    box-shadow: 0 4px 18px rgba(235, 195, 94, 0.25);
+}
+.st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"][aria-selected="true"] p {
+    color: #0B1220;
+}
+.st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] .react-aria-SelectionIndicator { display: none; }
+@media (max-width: 760px) {
+    .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+</style>
+"""
+
+
+def _cov_corr_help(cov: pd.DataFrame, corr: pd.DataFrame) -> str:
+    """Explicación de los dos mapas de color, con un ejemplo tomado de los dos primeros activos en pantalla."""
+    a, b = cov.index[0], cov.index[1]
+    va, vb, cab = float(cov.loc[a, a]), float(cov.loc[b, b]), float(cov.loc[a, b])
+    sa, sb = va ** 0.5, vb ** 0.5
+    rho = float(corr.loc[a, b])
+    if rho > 0.7:
+        reading = "se mueven muy parecido: combinarlos reduce poco el riesgo"
+    elif rho > 0.3:
+        reading = "tienden a moverse juntos, pero no siempre: combinarlos reduce algo el riesgo"
+    elif rho > -0.3:
+        reading = "casi no tienen relación lineal: combinarlos reduce bastante el riesgo"
+    else:
+        reading = "tienden a moverse en sentido contrario: uno compensa al otro y el riesgo baja mucho"
+    return f"""
+**Cómo se leen los cuadros.** Las dos gráficas son **tablas**: cada cuadro cruza el activo de su **fila** (nombre a la
+izquierda) con el activo de su **columna** (nombre abajo).
+- **Moverse a la derecha** = cambiar el activo de la columna; **moverse hacia abajo** = cambiar el activo de la fila.
+- **La diagonal** (de arriba-izquierda a abajo-derecha) cruza cada activo **consigo mismo**.
+- **Fuera de la diagonal** está cada **pareja** de activos. La tabla es un espejo: {a} con {b} vale lo mismo que {b}
+  con {a}.
+- **La barra de color** de la derecha es la escala: **arriba = valores altos** (más dorado), **abajo = valores bajos**
+  (oscuro y, en la correlación, azul si es negativo).
+
+**Covarianza (gráfica izquierda)** — mide si dos activos se mueven **en la misma dirección** y con qué fuerza.
+- En la diagonal está la **varianza** de cada activo (su riesgo propio). Su raíz es la volatilidad.
+- Fuera de la diagonal: **positiva** = suelen subir y bajar juntos; **negativa** = cuando uno sube el otro suele bajar;
+  **cerca de 0** = no hay relación clara.
+- Está en "decimal²" y depende de qué tan volátil es cada activo, por eso **no sirve para comparar parejas** entre sí:
+  para eso está la correlación.
+
+**Correlación (gráfica derecha)** — es la covarianza "normalizada": covarianza / (volatilidad 1 × volatilidad 2).
+Siempre está entre **−1 y +1**.
+- **+1 (dorado):** se mueven exactamente igual → no hay diversificación.
+- **0 (oscuro):** no hay relación lineal → buena diversificación.
+- **−1 (azul):** se mueven exactamente al revés → uno compensa al otro.
+- La diagonal siempre vale 1 (un activo se mueve igual que sí mismo).
+
+**Ejemplo con los datos en pantalla ({a} y {b}):**
+- Varianza de {a} = {va:.4f} → volatilidad √{va:.4f} = **{sa:.1%}** al año.
+- Varianza de {b} = {vb:.4f} → volatilidad √{vb:.4f} = **{sb:.1%}** al año.
+- Covarianza {a}–{b} = {cab:.4f} → correlación = {cab:.4f} / ({sa:.4f} × {sb:.4f}) = **{rho:.2f}**: {reading}.
+
+**¿Para qué sirve?** Markowitz usa esta matriz para armar carteras: entre **menos correlacionados** estén los activos,
+más baja el riesgo de la cartera al combinarlos, sin sacrificar rendimiento esperado.
+"""
+
+
 def _heatmap(matrix: pd.DataFrame, title: str, zmid=None, fmt=".2f"):
+    z = matrix.to_numpy()
     fig = go.Figure(go.Heatmap(
-        z=matrix.to_numpy(), x=list(matrix.columns), y=list(matrix.index), zmid=zmid,
-        colorscale=[[0, "#2DE1FC"], [0.5, "#1A1F2B"], [1, "#EBC35E"]] if zmid is not None else "Teal",
-        texttemplate="%{z:" + fmt + "}" if len(matrix) <= 12 else None, hoverongaps=False,
+        z=z, x=list(matrix.columns), y=list(matrix.index), zmid=zmid,
+        colorscale=([[0, "#2DE1FC"], [0.5, "#1A1F2B"], [1, "#EBC35E"]] if zmid is not None
+                    else [[0, "#1A1F2B"], [1, "#EBC35E"]]),
+        hoverongaps=False,
     ))
+    if len(matrix) <= 12:
+        # Números oscuros sobre los cuadros claros y claros sobre los oscuros, para que se lean al proyectar.
+        lo_, hi_ = np.nanmin(z), np.nanmax(z)
+        if zmid is not None:
+            half = max(abs(lo_ - zmid), abs(hi_ - zmid)) or 1.0
+            pos = lambda v: (v - zmid + half) / (2 * half)  # noqa: E731
+        else:
+            pos = lambda v: (v - lo_) / ((hi_ - lo_) or 1.0)  # noqa: E731
+        for i, row in enumerate(matrix.index):
+            for j, col in enumerate(matrix.columns):
+                v = z[i, j]
+                if np.isnan(v):
+                    continue
+                p_ = pos(v)
+                dark = p_ > 0.7 or (zmid is not None and p_ < 0.2)
+                fig.add_annotation(x=col, y=row, text=f"<b>{format(v, fmt)}</b>", showarrow=False,
+                                   font=dict(color="#0B1220" if dark else "#E6E6E6", size=14))
     fig.update_layout(title=title, height=420 if len(matrix) > 6 else 320, **LAYOUT)
+    # Se lee como una tabla: el primer activo arriba, así la diagonal va de arriba-izquierda a abajo-derecha.
+    fig.update_yaxes(autorange="reversed")
     return fig
 
 
@@ -289,6 +394,7 @@ def _tab_risk(lab: LabData):
     c1, c2 = st.columns(2)
     c1.plotly_chart(_heatmap(lab.sigma * m, "Covarianza anualizada (decimal²)", fmt=".4f"))
     c2.plotly_chart(_heatmap(corr, "Correlación (sin unidad)", zmid=0))
+    _explain("¿Cómo leo la covarianza y la correlación?", _cov_corr_help(lab.sigma * m, corr))
 
     st.markdown("**Prueba una cartera** (los pesos los eliges tú; deben sumar 1):")
     w = _weights_editor(list(lab.mu.index), "lab_risk_weights")
@@ -1430,8 +1536,12 @@ sector).
     groups = [([a for a, sec in zip(per_asset["activo"], per_asset["sector"]) if str(sec).strip() == name], cap)
               for name, cap in caps.items() if cap < 1.0] or None
 
-    tabs = st.tabs(["Riesgo conjunto", "Estrés y estimadores", "Markowitz y fronteras", "Black-Litterman", "Rebalanceo",
-                    "Backtest", "Beta, CAPM y valoración", "Exportar"])
+    st.markdown(LAB_NAV_CSS, unsafe_allow_html=True)
+    st.markdown("#### 🧭 Módulos del laboratorio")
+    st.caption("Elige un módulo; los supuestos de arriba aplican a todos.")
+    with st.container(key="lab_nav"):
+        tabs = st.tabs(["🔗 Riesgo conjunto", "🌪️ Estrés y estimadores", "📈 Markowitz y fronteras", "🧠 Black-Litterman",
+                        "🔄 Rebalanceo", "⏪ Backtest", "🏦 Beta, CAPM y valoración", "📤 Exportar"])
     results = None
     with tabs[0]:
         w_test = _tab_risk(lab)
