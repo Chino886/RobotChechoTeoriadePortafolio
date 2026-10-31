@@ -1,13 +1,13 @@
 <svg viewBox="0 0 100 100" width="44" height="44" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="vantisGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#00FFA3"/>
       <stop offset="100%" stop-color="#2DE1FC"/>
     </linearGradient>
   </defs>
-  <polygon points="50,5 95,50 50,95 5,50" fill="url(#vantisGrad)" opacity="0.18"/>
-  <polygon points="50,5 95,50 50,95 5,50" fill="none" stroke="url(#vantisGrad)" stroke-width="3"/>
-  <rect x="38" y="55" width="7" height="18" rx="2" fill="url(#vantisGrad)"/>
-  <rect x="48" y="45" width="7" height="28" rx="2" fill="url(#vantisGrad)"/>
-  <rect x="58" y="35" width="7" height="38" rx="2" fill="url(#vantisGrad)"/>
+  <polygon points="50,5 95,50 50,95 5,50" fill="url(#logoGrad)" opacity="0.18"/>
+  <polygon points="50,5 95,50 50,95 5,50" fill="none" stroke="url(#logoGrad)" stroke-width="3"/>
+  <rect x="38" y="55" width="7" height="18" rx="2" fill="url(#logoGrad)"/>
+  <rect x="48" y="45" width="7" height="28" rx="2" fill="url(#logoGrad)"/>
+  <rect x="58" y="35" width="7" height="38" rx="2" fill="url(#logoGrad)"/>
 </svg>

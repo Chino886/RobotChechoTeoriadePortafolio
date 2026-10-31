@@ -39,6 +39,7 @@ from src.comparison import (
 )
 from src.data import FREQUENCY_RULES, fetch_asset_data, fetch_fx_to_usd, fetch_many, resample_prices
 from src.rates import fetch_bond_series, search_bond_series
+from laboratorio_v2 import render_portfolio_lab
 from src.forecasting import (
     FORECAST_MODELS,
     WALKFORWARD_ORIGINS,
@@ -73,7 +74,7 @@ DEV_MODE = True
 # IDENTIDAD DEL EQUIPO (RF-01)
 # ---------------------------------------------------------------------------
 SYSTEM_NAME = "Pre - Asset Allocation Analytic Bot"
-BRAND_NAME = "Vantis"  # marca visual; SYSTEM_NAME sigue siendo el nombre oficial del entregable
+BRAND_NAME = "DPST"  # nombre visual del bot; SYSTEM_NAME sigue siendo el nombre oficial del entregable
 # Relativo a este archivo (no al directorio de trabajo): Streamlit Cloud corre la
 # app desde la raíz del repo, no desde robot_analitico/.
 LOGO_PATH = Path(__file__).parent / "static" / "logo.svg"
@@ -167,7 +168,7 @@ DISCLAIMER_TEXT = (
 )
 
 
-def _logo_svg(size: int = 44, gradient_id: str = "vantisGrad") -> str:
+def _logo_svg(size: int = 44, gradient_id: str = "logoGrad") -> str:
     """
     SVG del logo (static/logo.svg) con tamaño y id de gradiente ajustables:
     si se inserta dos veces en la página, cada copia necesita su propio id.
@@ -179,7 +180,7 @@ def _logo_svg(size: int = 44, gradient_id: str = "vantisGrad") -> str:
         return "💠"
     return (
         svg.replace('width="44" height="44"', f'width="{size}" height="{size}"')
-        .replace("vantisGrad", gradient_id)
+        .replace("logoGrad", gradient_id)
     )
 
 
@@ -267,7 +268,7 @@ def render_sidebar_style() -> None:
         [data-testid="stSidebar"] [data-baseweb="base-input"] {
             border-radius: 10px;
         }
-        .vantis-sidebar-brand {
+        .brand-sidebar-card {
             padding: 0.9rem 1rem;
             margin-bottom: 0.5rem;
             border-radius: 12px 12px 0 0;
@@ -286,7 +287,7 @@ def render_sidebar_style() -> None:
         unsafe_allow_html=True,
     )
     st.sidebar.markdown(
-        f'<div class="vantis-sidebar-brand">{_logo_svg(28, "vantisGradSidebar")}'
+        f'<div class="brand-sidebar-card">{_logo_svg(28, "logoGradSidebar")}'
         f"<span>{BRAND_NAME}</span></div>",
         unsafe_allow_html=True,
     )
@@ -990,7 +991,10 @@ def render_sovereign_rates() -> None:
         "al país indicado — nunca se asume un código de serie de antemano."
     )
 
-    fred_api_key = st.secrets.get("FRED_API_KEY")
+    try:
+        fred_api_key = st.secrets.get("FRED_API_KEY")
+    except Exception:  # sin secrets.toml, st.secrets lanza en vez de devolver None
+        fred_api_key = None
     if not fred_api_key:
         st.info(
             "Esta vista necesita una API key gratuita de FRED configurada en "
@@ -1856,6 +1860,7 @@ def main() -> None:
     render_comparison()
     render_portfolio_forecast()
     render_sovereign_rates()
+    render_portfolio_lab()
 
     if not DEV_MODE and st.button("Cerrar sesión"):
         st.logout()
