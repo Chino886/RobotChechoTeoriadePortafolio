@@ -262,3 +262,22 @@ def test_rolling_risk_uses_complete_windows(synthetic_prices):
     np.testing.assert_allclose(dd, [0.0, -0.5, -0.4], atol=1e-12)
     with pytest.raises(ValueError):
         portfolio_return_series(returns, pd.Series({"SIM1": 1.0}))
+
+
+# --- P2-15 (ampliado): topes por grupo/sector ---------------------------------
+
+def test_group_caps_are_respected_and_can_be_infeasible():
+    mu = pd.Series({"X1": 0.12, "X2": 0.10, "Y1": 0.05})
+    sigma = pd.DataFrame(np.diag([0.04, 0.03, 0.01]), index=mu.index, columns=mu.index)
+    bounds = [(0.0, 1.0)] * 3
+    groups = [(["X1", "X2"], 0.6)]  # el "sector X" no puede pesar más de 60 %
+    for res in (max_expected_return(mu, bounds, sigma, groups=groups), min_variance(mu, sigma, bounds, groups=groups),
+                max_sharpe(mu, sigma, 0.01, bounds, groups=groups), personal_optimum(mu, sigma, 2.0, bounds, groups=groups)):
+        assert res.ok, res.message
+        assert res.weights[["X1", "X2"]].sum() <= 0.6 + 1e-7
+        assert res.weights.sum() == pytest.approx(1.0, abs=1e-8)
+    assert max_expected_return(mu, bounds, sigma, groups=groups).weights["X1"] == pytest.approx(0.6, abs=1e-9)
+    frontier = efficient_frontier(mu, sigma, bounds, n_points=8, groups=groups)
+    assert (frontier["estado"] == "óptimo").all()
+    # Tope del grupo + cotas imposibles: Y1 <= 0.2 y X <= 0.6 no suman 1.
+    assert max_expected_return(mu, [(0, 1), (0, 1), (0, 0.2)], sigma, groups=groups).status == "inviable"

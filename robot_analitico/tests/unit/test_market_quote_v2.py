@@ -11,7 +11,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.market import fetch_quote, format_age  # noqa: E402
+from src.market import fetch_quote, fetch_quotes, format_age  # noqa: E402
 
 NOW = datetime(2026, 10, 30, 15, 0, 30, tzinfo=timezone.utc)
 SESSION = {"regular": {"start": int(datetime(2026, 10, 30, 13, 30, tzinfo=timezone.utc).timestamp()),
@@ -78,3 +78,15 @@ def test_errors_are_isolated_and_reported():
 
 def test_format_age():
     assert format_age(45) == "45 s" and format_age(600) == "10 min" and format_age(None) == "N/D"
+
+
+def test_many_quotes_isolate_errors_and_keep_bars():
+    good = _bars(["2026-10-30 10:58", "2026-10-30 10:59"], [270.0, 270.5])
+
+    def factory(t):
+        return FakeTicker({}, fail=True) if t == "MALO" else FakeTicker({"1d": good})
+
+    quotes = fetch_quotes(["aapl", "MALO", "msft", "AAPL", ""], now=NOW, ticker_factory=factory)
+    assert [q.ticker for q in quotes] == ["AAPL", "MALO", "MSFT"]  # sin duplicados ni vacíos
+    assert [q.ok for q in quotes] == [True, False, True]  # el error no borra a los demás
+    assert len(quotes[0].bars) == 2 and quotes[0].bars.iloc[-1] == 270.5

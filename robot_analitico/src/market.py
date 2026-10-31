@@ -12,7 +12,7 @@ para el "reloj de cotización". Separado de la descarga histórica de la v1
   movimiento. Yahoo publica con retrasos según la bolsa y prohíbe
   redistribuir sus datos: no se guardan cotizaciones en archivos.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -34,6 +34,7 @@ class Quote:
     received_at: Optional[datetime] = None  # cuándo la recibió la app, en UTC
     session: str = "desconocida"  # "en sesión", "fuera de sesión" o "desconocida"
     error: Optional[str] = None
+    bars: Optional[pd.Series] = field(default=None, repr=False, compare=False)  # cierres de 1 minuto (para el gráfico)
 
     @property
     def age_seconds(self) -> Optional[float]:
@@ -96,10 +97,21 @@ def fetch_quote(ticker: str, now: Optional[datetime] = None, ticker_factory=None
             ticker=ticker, ok=True, price=float(close.iloc[-1]),
             exchange=metadata.get("fullExchangeName") or metadata.get("exchangeName"),
             currency=metadata.get("currency"), timezone=metadata.get("exchangeTimezoneName"),
-            last_bar_at=last_at, received_at=received, session=_session_state(metadata, received),
+            last_bar_at=last_at, received_at=received, session=_session_state(metadata, received), bars=close,
         )
     except Exception as exc:  # timeout, 429, red: se conserva el diagnóstico
         return Quote(ticker=ticker, ok=False, received_at=(now or datetime.now(timezone.utc)), error=f"Error de consulta: {exc}")
+
+
+def fetch_quotes(tickers, now: Optional[datetime] = None, ticker_factory=None) -> "list[Quote]":
+    """Varias cotizaciones; el error de una no borra las demás (error aislado)."""
+    seen, out = set(), []
+    for t in tickers:
+        t = (t or "").strip().upper()
+        if t and t not in seen:
+            seen.add(t)
+            out.append(fetch_quote(t, now=now, ticker_factory=ticker_factory))
+    return out
 
 
 def format_age(seconds: Optional[float]) -> str:

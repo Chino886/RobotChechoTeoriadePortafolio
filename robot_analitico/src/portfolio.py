@@ -297,6 +297,41 @@ def _start(bounds, n) -> np.ndarray:
     return np.clip(x0, lo, hi)
 
 
+def _group_indices(groups, labels) -> "list[tuple[list[int], float]]":
+    """
+    Normaliza topes por grupo (sector, país, etc.): lista de (miembros, peso
+    máximo del grupo). Los miembros pueden ser etiquetas o posiciones.
+    """
+    out = []
+    for members, cap in groups or []:
+        idx = [m if isinstance(m, (int, np.integer)) else labels.index(m) for m in members if
+               isinstance(m, (int, np.integer)) or m in labels]
+        if idx:
+            out.append((sorted(set(int(i) for i in idx)), float(cap)))
+    return out
+
+
+def _constraints(n: int, groups_idx) -> list:
+    """Presupuesto sum(w) = 1 y, si hay, sum(w_grupo) <= tope para cada grupo."""
+    cons = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0, "jac": lambda w: np.ones_like(w)}]
+    if groups_idx:
+        A = np.zeros((len(groups_idx), n))
+        for r, (idx, _) in enumerate(groups_idx):
+            A[r, idx] = 1.0
+        caps = np.array([cap for _, cap in groups_idx])
+        cons.append({"type": "ineq", "fun": lambda w: caps - A @ w, "jac": lambda w: -A})
+    return cons
+
+
+def _group_ub(n: int, groups_idx):
+    if not groups_idx:
+        return None, None
+    A = np.zeros((len(groups_idx), n))
+    for r, (idx, _) in enumerate(groups_idx):
+        A[r, idx] = 1.0
+    return A, np.array([cap for _, cap in groups_idx])
+
+
 def gmv_analytic(sigma) -> np.ndarray:
     """Control analítico sin cotas: w = Sigma^-1 1 / (1' Sigma^-1 1). Solo válido con inversa y cotas inactivas."""
     s = np.asarray(sigma, dtype=float)
@@ -305,14 +340,15 @@ def gmv_analytic(sigma) -> np.ndarray:
     return x / x.sum()
 
 
-def max_expected_return(mu, bounds, sigma=None) -> OptimizationResult:
-    """Máximo w'mu sujeto a sum(w)=1 y cotas (programación lineal). Puede ser no acotado sin límites."""
+def max_expected_return(mu, bounds, sigma=None, groups=None) -> OptimizationResult:
+    """Máximo w'mu sujeto a sum(w)=1, cotas y topes por grupo (programación lineal). Puede ser no acotado sin límites."""
     labels = _labels(mu)
     reason = check_bounds(bounds)
     if reason:
         return OptimizationResult(name="Máximo rendimiento esperado", status="inviable", message=reason)
     m = np.asarray(mu, dtype=float)
-    res = linprog(-m, A_eq=np.ones((1, len(m))), b_eq=[1.0], bounds=bounds, method="highs")
+    A_ub, b_ub = _group_ub(len(m), _group_indices(groups, labels))
+    res = linprog(-m, A_ub=A_ub, b_ub=b_ub, A_eq=np.ones((1, len(m))), b_eq=[1.0], bounds=bounds, method="highs")
     if res.status == 2:
         return OptimizationResult(name="Máximo rendimiento esperado", status="inviable", message=res.message)
     if res.status == 3:
@@ -329,7 +365,8 @@ def max_expected_return(mu, bounds, sigma=None) -> OptimizationResult:
     return result
 
 
-def min_variance(mu, sigma, bounds, target_return: Optional[float] = None, name: str = "Mínima varianza global") -> OptimizationResult:
+def min_variance(mu, sigma, bounds, target_return: Optional[float] = None, name: str = "Mínima varianza global",
+                 groups=None) -> OptimizationResult:
     """
     min w'Sigma w  s.a.  sum(w)=1, cotas, y (opcional) w'mu = objetivo.
     Sin objetivo es la cartera global de mínima varianza (no depende de mu).
@@ -340,10 +377,11 @@ def min_variance(mu, sigma, bounds, target_return: Optional[float] = None, name:
         return OptimizationResult(name=name, status="inviable", message=reason)
     m = np.asarray(mu, dtype=float)
     s = np.asarray(sigma, dtype=float)
-    cons = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0, "jac": lambda w: np.ones_like(w)}]
+    g_idx = _group_indices(groups, labels)
+    cons = _constraints(len(m), g_idx)
     if target_return is not None:
         # Antes de optimizar: ¿el objetivo está entre el mínimo y el máximo rendimiento alcanzables?
-        top, bottom = max_expected_return(m, bounds), max_expected_return(-m, bounds)
+        top, bottom = max_expected_return(m, bounds, groups=g_idx), max_expected_return(-m, bounds, groups=g_idx)
         if top.ok and bottom.ok and not (-bottom.mean - 1e-12 <= target_return <= top.mean + 1e-12):
             return OptimizationResult(
                 name=name, status="inviable",
@@ -360,14 +398,14 @@ def min_variance(mu, sigma, bounds, target_return: Optional[float] = None, name:
     return _finish(name, res.x, m, s, labels, bounds, str(res.message), int(res.nit))
 
 
-def max_sharpe(mu, sigma, rf_period: float, bounds) -> OptimizationResult:
+def max_sharpe(mu, sigma, rf_period: float, bounds, groups=None) -> OptimizationResult:
     """
     Cartera tangente: máximo (w'mu - rf)/sqrt(w'Sigma w) dentro de las cotas.
     Si ninguna cartera factible tiene premio positivo, no hay tangente
     significativa: se informa en lugar de forzarla.
     """
     name = "Tangente (máximo Sharpe)"
-    best = max_expected_return(mu, bounds)
+    best = max_expected_return(mu, bounds, groups=groups)
     if not best.ok:
         if best.status == "no acotado":
             return OptimizationResult(name=name, status="no acotado", message="Sin cotas el Sharpe no queda bien definido con este solver; fije límites.")
@@ -385,7 +423,7 @@ def max_sharpe(mu, sigma, rf_period: float, bounds) -> OptimizationResult:
         var = w @ s @ w
         return -(w @ m - rf_period) / np.sqrt(max(var, 1e-30))
 
-    cons = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0, "jac": lambda w: np.ones_like(w)}]
+    cons = _constraints(len(m), _group_indices(groups, labels))
     starts = [_start(bounds, len(m)), best.weights.to_numpy()]
     results = [_slsqp(neg_sharpe, x0, bounds, cons) for x0 in starts]
     results = [r for r in results if r.success]
@@ -395,7 +433,7 @@ def max_sharpe(mu, sigma, rf_period: float, bounds) -> OptimizationResult:
     return _finish(name, res.x, m, s, labels, bounds, str(res.message), int(res.nit))
 
 
-def personal_optimum(mu, sigma, gamma: float, bounds) -> OptimizationResult:
+def personal_optimum(mu, sigma, gamma: float, bounds, groups=None) -> OptimizationResult:
     """
     Óptimo personal: máximo U = w'mu - (gamma/2) w'Sigma w dentro de las
     cotas. gamma (aversión al riesgo) la decide el equipo; aquí solo se usa.
@@ -409,14 +447,14 @@ def personal_optimum(mu, sigma, gamma: float, bounds) -> OptimizationResult:
     labels = _labels(mu)
     m = np.asarray(mu, dtype=float)
     s = np.asarray(sigma, dtype=float)
-    cons = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0, "jac": lambda w: np.ones_like(w)}]
+    cons = _constraints(len(m), _group_indices(groups, labels))
     res = _slsqp(lambda w: -(w @ m - gamma / 2 * (w @ s @ w)), _start(bounds, len(m)), bounds, cons)
     if not res.success:
         return OptimizationResult(name=name, status="falla numérica", message=str(res.message))
     return _finish(name, res.x, m, s, labels, bounds, str(res.message), int(res.nit))
 
 
-def efficient_frontier(mu, sigma, bounds, n_points: int = 30) -> pd.DataFrame:
+def efficient_frontier(mu, sigma, bounds, n_points: int = 30, groups=None) -> pd.DataFrame:
     """
     Frontera de mínima varianza calculada por optimización (no por nube
     simulada): para cada retorno objetivo alcanzable se resuelve min w'Sigma w.
@@ -425,9 +463,9 @@ def efficient_frontier(mu, sigma, bounds, n_points: int = 30) -> pd.DataFrame:
     es degenerado.
     """
     m = np.asarray(mu, dtype=float)
-    gmv = min_variance(mu, sigma, bounds)
-    hi = max_expected_return(mu, bounds)
-    lo = max_expected_return(-m if not isinstance(mu, pd.Series) else -mu, bounds)
+    gmv = min_variance(mu, sigma, bounds, groups=groups)
+    hi = max_expected_return(mu, bounds, groups=groups)
+    lo = max_expected_return(-m if not isinstance(mu, pd.Series) else -mu, bounds, groups=groups)
     rows = []
     if not (gmv.ok and hi.ok and lo.ok):
         return pd.DataFrame(columns=["objetivo", "volatilidad", "rama", "estado"])
@@ -438,7 +476,7 @@ def efficient_frontier(mu, sigma, bounds, n_points: int = 30) -> pd.DataFrame:
     branches.append(("eficiente", np.linspace(r_gmv, r_max, n_points) if r_max - r_gmv > 1e-10 else np.array([r_gmv])))
     for branch, targets in branches:
         for target in targets:
-            res = min_variance(mu, sigma, bounds, target_return=float(target), name="frontera")
+            res = min_variance(mu, sigma, bounds, target_return=float(target), name="frontera", groups=groups)
             rows.append({
                 "objetivo": float(target),
                 "volatilidad": res.volatility if res.ok else np.nan,
