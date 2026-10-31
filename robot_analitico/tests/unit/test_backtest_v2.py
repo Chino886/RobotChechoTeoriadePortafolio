@@ -46,9 +46,9 @@ def test_no_look_ahead_p2_29(returns):
     cfg = _cfg()
     seen = []
 
-    def spy(strategy, window, cfg_, previous):
+    def spy(strategy, window, cfg_, previous, as_of=None):
         seen.append(window.index[-1])
-        return _target_weights(strategy, window, cfg_, previous)
+        return _target_weights(strategy, window, cfg_, previous, as_of)
 
     run = run_strategy(STRAT_GMV, returns, cfg, target_fn=spy)
     for decision, last_used in zip(run.weights_history.index, seen):
@@ -68,7 +68,8 @@ def test_comparators_share_universe_period_and_costs_p2_30(returns):
     res = walk_forward(returns, cfg)
     idx = {name: tuple(run.wealth.index) for name, run in res.runs.items()}
     assert len(set(idx.values())) == 1  # mismo periodo evaluado
-    assert set(res.runs) == set(ALL_STRATEGIES)
+    from src.backtest import STRAT_BL, bl_label
+    assert set(res.runs) == {bl_label(cfg) if s == STRAT_BL else s for s in ALL_STRATEGIES}
     for run in res.runs.values():
         assert list(run.weights_history.columns) == list(returns.columns)  # mismo universo y orden
     hold = res.runs[STRAT_HOLD]

@@ -13,6 +13,12 @@ Evaluación temporal walk-forward de estrategias (guía V2, sección 7.2).
   deben hacerse mirando validación, no la prueba final.
 - Si el optimizador falla en una fecha se conserva la cartera anterior y se
   cuenta la falla (no se inventan pesos).
+- Black-Litterman usa las views registradas, cada una solo desde su fecha de
+  conocimiento y hasta su vencimiento. Sin views, con gamma = delta y
+  w_ref = 1/N, el óptimo coincide exactamente con 1/N: se rotula así.
+- Sigma puede estimarse con la muestral, Ledoit-Wolf o EWMA (guía 4.2), y la
+  elección entre candidatos se hace en validación; la prueba final se reporta
+  sin reajustar.
 """
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -20,15 +26,17 @@ from typing import Callable, Optional
 import numpy as np
 import pandas as pd
 
-from src.black_litterman import implied_prior
+from src.black_litterman import build_view_set, implied_prior, posterior
+from src.estimators import ewma_covariance, ledoit_wolf
 from src.portfolio import covariance_matrix, min_variance, personal_optimum
 
 STRAT_HOLD = "Mantener cantidades (1/N inicial)"
 STRAT_EQUAL = "1/N rebalanceado"
 STRAT_GMV = "Mínima varianza (GMV)"
 STRAT_MV = "Markowitz (óptimo personal γ)"
-STRAT_BL = "Black-Litterman (prior, sin views)"
+STRAT_BL = "Black-Litterman"
 ALL_STRATEGIES = [STRAT_HOLD, STRAT_EQUAL, STRAT_GMV, STRAT_MV, STRAT_BL]
+ESTIMATORS = ["muestral", "Ledoit-Wolf", "EWMA"]
 
 
 @dataclass
@@ -43,6 +51,30 @@ class BacktestConfig:
     validation_share: float = 0.5  # fracción del tramo evaluable usada como validación
     bl_delta: float = 3.0
     groups: Optional[list] = None
+    estimator: str = "muestral"  # "muestral", "Ledoit-Wolf" o "EWMA"
+    ewma_lambda: float = 0.94
+    views: Optional[list] = None  # views registradas (con known_at / expires_at)
+    bl_tau: float = 0.05
+    w_ref: Optional[pd.Series] = None  # referencia de BL; None = 1/N
+
+
+def bl_label(cfg: BacktestConfig) -> str:
+    """Nombre honesto de la estrategia BL según las views y los parámetros."""
+    if cfg.views:
+        return "Black-Litterman (views registradas, por fecha)"
+    if cfg.w_ref is None and abs(cfg.gamma - cfg.bl_delta) < 1e-12:
+        return "Black-Litterman sin views (= 1/N: γ = δ y w_ref = 1/N)"
+    return "Black-Litterman sin views (prior de equilibrio)"
+
+
+def estimate_sigma(window: pd.DataFrame, cfg: BacktestConfig) -> pd.DataFrame:
+    if cfg.estimator == "muestral":
+        return covariance_matrix(window)
+    if cfg.estimator == "Ledoit-Wolf":
+        return ledoit_wolf(window).sigma
+    if cfg.estimator == "EWMA":
+        return ewma_covariance(window, cfg.ewma_lambda)
+    raise ValueError(f"Estimador desconocido: {cfg.estimator}")
 
 
 @dataclass
@@ -64,20 +96,27 @@ class BacktestResult:
     decision_dates: "list[pd.Timestamp]"
 
 
-def _target_weights(strategy: str, window: pd.DataFrame, cfg: BacktestConfig, previous: Optional[pd.Series]) -> "tuple[Optional[pd.Series], str]":
+def _target_weights(strategy: str, window: pd.DataFrame, cfg: BacktestConfig, previous: Optional[pd.Series],
+                    as_of=None) -> "tuple[Optional[pd.Series], str]":
     assets = list(window.columns)
     n = len(assets)
     if strategy in (STRAT_EQUAL, STRAT_HOLD):
         return pd.Series(1.0 / n, index=assets), ""
     mu = window.mean()
-    sigma = covariance_matrix(window)
+    sigma = estimate_sigma(window, cfg)
     if strategy == STRAT_GMV:
         res = min_variance(mu, sigma, cfg.bounds, groups=cfg.groups)
     elif strategy == STRAT_MV:
         res = personal_optimum(mu, sigma, cfg.gamma, cfg.bounds, groups=cfg.groups)
     elif strategy == STRAT_BL:
-        pi = implied_prior(sigma, pd.Series(1.0 / n, index=assets), cfg.bl_delta)
-        res = personal_optimum(pi + cfg.rf_period, sigma, cfg.gamma, cfg.bounds, groups=cfg.groups)
+        ref = cfg.w_ref.reindex(assets) if cfg.w_ref is not None else pd.Series(1.0 / n, index=assets)
+        pi = implied_prior(sigma, ref, cfg.bl_delta)
+        mu_bl = pi
+        if cfg.views:
+            day = pd.Timestamp(as_of if as_of is not None else window.index[-1]).date()
+            vs = build_view_set(cfg.views, assets, sigma, cfg.bl_tau, as_of=day)  # solo views conocidas y vigentes
+            mu_bl = posterior(sigma, pi, cfg.bl_tau, vs).posterior
+        res = personal_optimum(mu_bl + cfg.rf_period, sigma, cfg.gamma, cfg.bounds, groups=cfg.groups)
     else:
         raise ValueError(f"Estrategia desconocida: {strategy}")
     if not res.ok:
@@ -103,7 +142,7 @@ def run_strategy(strategy: str, returns: pd.DataFrame, cfg: BacktestConfig,
         cost = 0.0
         if is_decision and (strategy != STRAT_HOLD or w is None):
             window = returns.iloc[t - cfg.window: t]  # solo información anterior a t
-            target, why = target_fn(strategy, window, cfg, None if w is None else pd.Series(w, index=assets))
+            target, why = target_fn(strategy, window, cfg, None if w is None else pd.Series(w, index=assets), dates[t])
             if target is None:
                 failures.append(f"{dates[t].date() if hasattr(dates[t], 'date') else dates[t]}: {why}")
                 if w is None:
@@ -146,9 +185,29 @@ def performance(net_returns: pd.Series, rf_period: float, periods_per_year: int)
             "máximo drawdown": dd, "rendimiento acumulado": wealth.iloc[-1] - 1, "periodos": len(net_returns)}
 
 
-def walk_forward(returns: pd.DataFrame, cfg: BacktestConfig, strategies: "Optional[list[str]]" = None) -> BacktestResult:
+def walk_forward(returns: pd.DataFrame, cfg: BacktestConfig, strategies: "Optional[list[str]]" = None,
+                 estimators: "Optional[list[str]]" = None) -> BacktestResult:
+    """
+    Corre cada estrategia (y, si se pasan varios, cada estimador de Sigma)
+    con la misma configuración. Los nombres incluyen el estimador cuando hay
+    más de uno; BL lleva su rótulo honesto (ver bl_label).
+    """
+    from dataclasses import replace
+
     strategies = strategies or ALL_STRATEGIES
-    runs = {s: run_strategy(s, returns, cfg) for s in strategies}
+    estimators = estimators or [cfg.estimator]
+    runs = {}
+    for est in estimators:
+        c = replace(cfg, estimator=est)
+        for s in strategies:
+            name = bl_label(c) if s == STRAT_BL else s
+            if len(estimators) > 1 and s not in (STRAT_HOLD, STRAT_EQUAL):
+                name = f"{name} · Σ {est}"
+            elif len(estimators) > 1:
+                name = f"{name} · Σ (no aplica)"
+                if name in runs:
+                    continue
+            runs[name] = run_strategy(s, returns, c)
     eval_index = returns.index[cfg.window:]
     split = int(len(eval_index) * cfg.validation_share)
     split = min(max(split, 1), len(eval_index) - 1)
@@ -168,3 +227,33 @@ def walk_forward(returns: pd.DataFrame, cfg: BacktestConfig, strategies: "Option
     metrics = pd.DataFrame(rows).set_index(["estrategia", "tramo"])
     decisions = sorted(set().union(*[set(r.weights_history.index) for r in runs.values()]))
     return BacktestResult(runs=runs, metrics=metrics, validation_start=val_start, test_start=test_start, decision_dates=decisions)
+
+
+@dataclass
+class Selection:
+    chosen: str
+    criterion: str
+    validation_metrics: dict
+    test_metrics: dict
+    note: str
+
+
+def select_by_validation(result: BacktestResult, criterion: str = "Sharpe anual",
+                         candidates: "Optional[list[str]]" = None, higher_is_better: bool = True) -> Selection:
+    """
+    Elige entre los candidatos definidos por el equipo usando SOLO el tramo
+    de validación; la prueba final del elegido se reporta tal cual, sin
+    reajustar ni volver a elegir.
+    """
+    val = result.metrics.xs("validación", level="tramo")
+    if candidates:
+        val = val.loc[[c for c in candidates if c in val.index]]
+    scores = val[criterion].dropna()
+    if scores.empty:
+        raise ValueError("Ningún candidato tiene la métrica de validación.")
+    chosen = scores.idxmax() if higher_is_better else scores.idxmin()
+    return Selection(
+        chosen=chosen, criterion=criterion, validation_metrics=val.loc[chosen].to_dict(),
+        test_metrics=result.metrics.loc[(chosen, "prueba final")].to_dict(),
+        note=f"Elegido por {criterion} en validación; la prueba final se muestra sin reajustar.",
+    )
