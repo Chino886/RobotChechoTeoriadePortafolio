@@ -1,0 +1,11 @@
+# Datos generados por la app en ejecución (incluye data/access_log.sqlite3 con nombres y correos)
+/data/
+
+# Credenciales locales de Streamlit
+.streamlit/secrets.toml
+
+# Entornos y cachés de Python
+venv/
+.venv/
+__pycache__/
+.pytest_cache/
