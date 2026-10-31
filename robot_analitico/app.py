@@ -40,6 +40,7 @@ from src.comparison import (
 from src.data import FREQUENCY_RULES, fetch_asset_data, fetch_fx_to_usd, fetch_many, resample_prices
 from src.rates import fetch_bond_series, search_bond_series
 from laboratorio_v2 import render_portfolio_lab
+from src.news_links import verify_items
 from src.forecasting import (
     FORECAST_MODELS,
     WALKFORWARD_ORIGINS,
@@ -1656,11 +1657,35 @@ def _render_news_block(target, source_label: str, items: "list[dict]") -> None:
         )
 
 
+LINK_CHECK_TTL_SECONDS = 6 * 3600  # un enlace verificado no se vuelve a probar en 6 horas
+LINK_CHECK_EXTRA = 3  # se prueban algunos de más por fuente, por si varios están rotos
+
+
+@st.cache_data(ttl=LINK_CHECK_TTL_SECONDS, show_spinner=False)
+def _verified_news(items: "tuple[tuple[str, str, str, str], ...]") -> "tuple[list[dict], list[dict]]":
+    """Prueba los enlaces en paralelo (src/news_links.py) y separa los que abren de los que no."""
+    news = [{"title": t, "link": link, "publisher": pub, "published": when} for t, link, pub, when in items]
+    return verify_items(news, max_workers=16)
+
+
 def _render_top_news(target, news_by_source: "list[tuple[str, list[dict]]]", limit: int) -> bool:
-    """Muestra las primeras `limit` noticias de cada fuente. Devuelve False si no hubo ninguna."""
+    """
+    Muestra hasta `limit` noticias por fuente, SOLO con enlaces que abren una
+    noticia (los rotos, de redirección o de consentimiento se ocultan).
+    Devuelve False si no quedó ninguna.
+    """
+    shown_any, hidden_total = False, 0
     for source_label, items in news_by_source:
-        _render_news_block(target, source_label, items[:limit])
-    return any(items for _, items in news_by_source)
+        candidates = tuple((str(i.get("title", "")), str(i.get("link", "")), str(i.get("publisher", "")),
+                            str(i.get("published", ""))) for i in items[: limit + LINK_CHECK_EXTRA])
+        kept, hidden = _verified_news(candidates) if candidates else ([], [])
+        hidden_total += len(hidden)
+        _render_news_block(target, source_label, kept[:limit])
+        shown_any = shown_any or bool(kept)
+    if hidden_total:
+        target.caption(f"🔗 Se ocultaron {hidden_total} noticia(s) cuyo enlace no llevaba a la noticia "
+                       "(enlace roto, página de redirección o de consentimiento).")
+    return shown_any
 
 
 def render_news_sidebar() -> None:
