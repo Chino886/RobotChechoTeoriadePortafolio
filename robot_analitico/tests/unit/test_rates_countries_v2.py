@@ -12,7 +12,9 @@ IMF = "Interest Rates, Government Securities, Government Bonds for "
 
 SERIES = {
     "IRLTLT01": [
-        {"id": "IRLTLT01COQ156N", "title": OECD + "Colombia", "observation_end": "2026-04-01"},  # solo trimestral
+        {"id": "IRLTLT01CAQ156N", "title": OECD + "Canada", "observation_end": "2026-04-01"},  # solo trimestral
+        {"id": "IRLTLT01KRM156N", "title": OECD + "Korea", "observation_end": "2026-09-01"},
+        {"id": "IRLTLT01KRA156N", "title": OECD + "Republic of Korea", "observation_end": "2026-01-01"},  # mismo país
         {"id": "IRLTLT01DEM156N", "title": OECD + "Germany", "observation_end": "2026-09-01"},
         {"id": "IRLTLT01DEA156N", "title": OECD + "Germany", "observation_end": "2025-01-01"},
         {"id": "IRLTLT01PEA156N", "title": OECD + "Peru", "observation_end": "2015-01-01"},  # vieja
@@ -22,6 +24,16 @@ SERIES = {
         {"id": "INTGSBBRM193N", "title": IMF + "Brazil", "observation_end": "2026-06-01"},  # solo FMI
         {"id": "INTGSBDEM193N", "title": IMF + "Germany", "observation_end": "2026-08-01"},
         {"id": "INTGSBPEM193N", "title": IMF + "Peru", "observation_end": "2026-07-01"},
+    ],
+}
+
+
+# Búsqueda por nombre: Colombia no sale por código, sí por nombre (como antes del cambio).
+TEXT = {
+    "Colombia 10-Year government bond yield": [
+        {"id": "IRLTLT01COM156N", "title": OECD + "Colombia", "observation_end": "2026-09-01", "frequency_short": "M"},
+        {"id": "COLCPI", "title": "Consumer Price Index for Colombia", "observation_end": "2026-09-01", "frequency_short": "M"},
+        {"id": "IRLTLT01PEM156N", "title": OECD + "Peru", "observation_end": "2026-09-01", "frequency_short": "M"},
     ],
 }
 
@@ -46,6 +58,8 @@ class _Http:
     def get(self, url, params=None, timeout=None, **kw):
         if url.endswith("/series/search"):
             self.calls.append(dict(params))
+            if params.get("search_type") != "series_id":
+                return _Resp({"seriess": TEXT.get(params["search_text"], [])})
             rows = SERIES[params["search_text"].rstrip("*")]
             off = params.get("offset", 0)
             return _Resp({"count": len(rows), "seriess": rows[off:off + self.page_size]})
@@ -53,21 +67,29 @@ class _Http:
         return _Resp({"observations": obs + [{"date": "2026-01-01", "value": "."}]})
 
 
-def test_countries_from_oecd_any_frequency_plus_imf():
-    rows = {r["label"]: r for r in list_long_term_yield_countries("KEY", http=_Http())}
-    assert sorted(rows) == ["Alemania", "Brasil", "Colombia", "Perú"]
-    assert rows["Colombia"]["id"] == "IRLTLT01COQ156N" and rows["Colombia"]["frequency"] == "trimestral"
-    assert rows["Alemania"]["id"] == "IRLTLT01DEM156N"  # OCDE a 10 años y mensual gana
-    assert rows["Brasil"]["source"] == "FMI"
-    assert rows["Perú"]["id"] == "INTGSBPEM193N"  # la OCDE de Perú está 11 años atrasada
+def test_countries_from_codes_and_name_search_without_duplicates():
+    rows = list_long_term_yield_countries("KEY", http=_Http())
+    labels = [r["label"] for r in rows]
+    assert labels == ["Alemania", "Brasil", "Canadá", "Colombia", "Corea del Sur", "Perú"]  # Corea una sola vez
+    by = {r["label"]: r for r in rows}
+    assert by["Colombia"]["id"] == "IRLTLT01COM156N" and by["Colombia"]["source"] == "OCDE"  # vía búsqueda por nombre
+    assert by["Canadá"]["frequency"] == "trimestral"
+    assert by["Corea del Sur"]["id"] == "IRLTLT01KRM156N"
+    assert by["Alemania"]["id"] == "IRLTLT01DEM156N"  # OCDE a 10 años y mensual gana al FMI
+    assert by["Brasil"]["source"] == "FMI"
+    assert by["Perú"]["id"] == "INTGSBPEM193N"  # la OCDE de Perú está 11 años atrasada
 
 
 def test_search_reads_every_page():
     http = _Http(page_size=2)
     list_long_term_yield_countries("KEY", http=http)
-    offsets = [(c["search_text"], c["offset"]) for c in http.calls]
-    assert offsets == [("IRLTLT01*", 0), ("IRLTLT01*", 2), ("IRLTLT01*", 4), ("INTGSB*", 0), ("INTGSB*", 2)]
-    assert all(c["search_type"] == "series_id" for c in http.calls)
+    code_calls = [(c["search_text"], c["offset"]) for c in http.calls if c.get("search_type") == "series_id"]
+    assert code_calls == [("IRLTLT01*", 0), ("IRLTLT01*", 2), ("IRLTLT01*", 4), ("IRLTLT01*", 6),
+                          ("INTGSB*", 0), ("INTGSB*", 2)]
+    name_calls = {c["search_text"] for c in http.calls if c.get("search_type") != "series_id"}
+    assert "Colombia 10-Year government bond yield" in name_calls  # misma búsqueda que la versión anterior
+    assert "Colombia government bond yield" not in name_calls  # ya encontró con la primera
+    assert not any(t.startswith("Brazil") for t in name_calls)  # Brasil ya salió por código
 
 
 def test_rates_page_lists_countries_and_shows_rate_without_typing(monkeypatch):
@@ -84,7 +106,7 @@ def test_rates_page_lists_countries_and_shows_rate_without_typing(monkeypatch):
     at.run()
     assert not at.exception
     box = at.selectbox(key="rates_country")
-    assert box.value == "Colombia" and len(box.options) == 4
+    assert box.value == "Colombia" and len(box.options) == 6
     assert any("10.20%" in m.value for m in at.metric)
     box.set_value("Brasil").run()
     assert not at.exception and any("Brasil" in m.label for m in at.metric)

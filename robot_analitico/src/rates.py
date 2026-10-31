@@ -11,6 +11,8 @@ usa el buscador oficial de FRED (fred/series/search) para encontrar la
 serie real, y se muestra el título exacto que FRED devuelve para que quede
 claro cuál serie se está usando.
 """
+from concurrent.futures import ThreadPoolExecutor
+
 import pandas as pd
 import requests
 
@@ -132,13 +134,67 @@ def _search_prefix(api_key: str, prefix: str, http) -> "list[dict]":
             return out
 
 
+# Países que se buscan además por nombre (la búsqueda por código de serie no siempre los
+# trae; así se encontraba Colombia antes). Nombres en inglés, como los titula FRED.
+TEXT_SEARCH_COUNTRIES = [
+    "Colombia", "Brazil", "Peru", "Chile", "Mexico", "Argentina", "Ecuador", "Uruguay", "Paraguay", "Bolivia",
+    "Costa Rica", "Panama", "Guatemala", "Dominican Republic", "Venezuela", "China", "India", "Indonesia",
+    "South Africa", "Turkey", "Philippines", "Thailand", "Malaysia", "Vietnam", "Egypt", "Nigeria",
+    "Saudi Arabia", "Russia",
+]
+FREQ_SHORT = {"D": "diaria", "W": "semanal", "M": "mensual", "Q": "trimestral", "A": "anual"}
+SOURCE_RANK = {"OCDE": 0, "FMI": 1, "FRED": 2}
+FREQ_RANK.update({"diaria": -2, "semanal": -1})
+
+
+def _row(series: dict, country: str, source: str, detail: str, frequency: str) -> dict:
+    return {"country": country, "label": COUNTRY_ES.get(country, country), "id": series.get("id", ""),
+            "title": series.get("title", ""), "source": source, "detail": detail, "frequency": frequency,
+            "observation_end": series.get("observation_end", "")}
+
+
+def _classify(series: dict, country: str) -> "dict | None":
+    """Convierte un resultado de la búsqueda por nombre en fila, si es una tasa de bonos del gobierno del país."""
+    title = series.get("title", "")
+    if _country_from_title(title) != country:
+        return None
+    low = title.lower()
+    if "bond" not in low and "government securities" not in low:
+        return None
+    if "long-term government bond yields" in low and "10-year" in low:
+        source, detail = "OCDE", SOURCES["IRLTLT01"]["detail"]
+    elif series.get("id", "").startswith("INTGSB") or "government bonds" in low:
+        source, detail = "FMI", SOURCES["INTGSB"]["detail"]
+    else:
+        source, detail = "FRED", "según el título de la serie"
+    freq = FREQ_SHORT.get(str(series.get("frequency_short", "")).upper()[:1])
+    return _row(series, country, source, detail, freq) if freq else None
+
+
+def _search_country_text(api_key: str, country: str, http) -> "list[dict]":
+    """Misma búsqueda por nombre que usaba la versión anterior; si no trae nada útil, una más general."""
+    for text in (f"{country} 10-Year government bond yield", f"{country} government bond yield"):
+        params = {"search_text": text, "api_key": api_key, "file_type": "json",
+                  "limit": 25, "order_by": "popularity", "sort_order": "desc"}
+        response = http.get(f"{FRED_BASE_URL}/series/search", params=params, timeout=15)
+        response.raise_for_status()
+        rows = [r for r in (_classify(s, country) for s in response.json().get("seriess", [])) if r]
+        if rows:
+            return rows
+    return []
+
+
 def list_long_term_yield_countries(api_key: str, http=requests) -> "list[dict]":
     """
-    Países con alguna serie de rendimiento de bonos del gobierno en FRED (OCDE a 10 años
-    o, si no hay, FMI). Una fila por país, ordenada por el nombre en español, con:
-    country, label, id, title, source, detail, frequency, observation_end.
-    Para cada país se elige la serie de la OCDE (10 años) salvo que la del FMI sea más de
-    un año más reciente; dentro de cada fuente, la de frecuencia más alta y dato más nuevo.
+    Países con alguna serie de rendimiento de bonos del gobierno en FRED. Una fila por país
+    (por nombre en español, sin repetidos), ordenada, con: country, label, id, title, source,
+    detail, frequency, observation_end.
+
+    1. Búsqueda por código: OCDE a 10 años (IRLTLT01…) y FMI (INTGSB…).
+    2. Búsqueda por nombre para los países de TEXT_SEARCH_COUNTRIES que no salieron en el paso 1
+       (por ejemplo Colombia).
+    Por país se prefiere la OCDE a 10 años, luego el FMI y luego otra serie de bonos, salvo que
+    una de menor preferencia tenga datos más de un año más recientes.
     """
     candidates = {}
     for prefix, meta in SOURCES.items():
@@ -146,31 +202,35 @@ def list_long_term_yield_countries(api_key: str, http=requests) -> "list[dict]":
             sid = s.get("id", "")
             freq = next((f for suf, f in meta["suffixes"].items() if sid.startswith(prefix) and sid.endswith(suf)), None)
             country = _country_from_title(s.get("title", ""))
-            if not freq or not country:
-                continue
-            candidates.setdefault(country, []).append({
-                "country": country, "label": COUNTRY_ES.get(country, country), "id": sid,
-                "title": s.get("title", ""), "source": meta["name"], "detail": meta["detail"], "frequency": freq,
-                "observation_end": s.get("observation_end", ""),
-            })
+            if freq and country:
+                row = _row(s, country, meta["name"], meta["detail"], freq)
+                candidates.setdefault(row["label"], []).append(row)
+
+    missing = [c for c in TEXT_SEARCH_COUNTRIES if COUNTRY_ES.get(c, c) not in candidates]
+    if missing:
+        def safe(country):
+            try:
+                return _search_country_text(api_key, country, http)
+            except Exception:  # un país que falle no tumba la lista
+                return []
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            for rows in pool.map(safe, missing):
+                for row in rows:
+                    candidates.setdefault(row["label"], []).append(row)
 
     def best_of(rows):
         # Entre las series con dato de hasta un año menos que la más nueva, la de mayor frecuencia
-        # (mensual > trimestral > anual) y, si empatan, la más reciente.
+        # y, si empatan, la más reciente.
         newest = max(r["observation_end"] for r in rows)
         fresh = [r for r in rows if _days_between(r["observation_end"], newest) <= OECD_GRACE_DAYS]
         return sorted(fresh, key=lambda r: (FREQ_RANK[r["frequency"]], _neg(r["observation_end"])))[0]
 
     chosen = []
     for rows in candidates.values():
-        oecd = [r for r in rows if r["source"] == "OCDE"]
-        imf = [r for r in rows if r["source"] == "FMI"]
-        best_oecd = best_of(oecd) if oecd else None
-        best_imf = best_of(imf) if imf else None
-        if best_oecd and (not best_imf or _days_between(best_oecd["observation_end"], best_imf["observation_end"]) <= OECD_GRACE_DAYS):
-            chosen.append(best_oecd)
-        else:
-            chosen.append(best_imf)
+        per_source = sorted((best_of([r for r in rows if r["source"] == src]) for src in {r["source"] for r in rows}),
+                            key=lambda r: SOURCE_RANK[r["source"]])
+        newest = max(r["observation_end"] for r in per_source)
+        chosen.append(next(r for r in per_source if _days_between(r["observation_end"], newest) <= OECD_GRACE_DAYS))
     return sorted(chosen, key=lambda r: r["label"])
 
 
