@@ -89,13 +89,18 @@ guía a `tests/fixtures/` (mismos nombres exactos):
 - `Resultados_esperados_20_activos_TBS_EIA.csv`
 - `Anexo_matriz_casos_prueba_robot_analitico_TBS_EIA_FINAL.csv`
 
-Las pruebas de la v2 (`tests/unit/test_*_v2.py`, 34 pruebas sin red) usan
-los datos del paquete docente en `paquete_v2/data/` y cubren P2-6 a P2-17,
-P2-19 a P2-28 y P2-31 a P2-34 de la guía v2 (controles analíticos de dos
-activos, Black-Litterman, rebalanceo y caso Alimentos del Norte). La conexión
-real a Yahoo (P2-3), la evaluación walk-forward de estrategias (P2-29, P2-30)
-y la defensa (P2-36) se verifican aparte o están pendientes; un mock no
+Las pruebas de la v2 (`tests/unit/test_*_v2.py`, 51 pruebas sin red) usan
+los datos del paquete docente en `paquete_v2/data/` y cubren P2-5 a P2-17,
+P2-19 a P2-35 de la guía v2: controles analíticos de dos activos,
+Black-Litterman, rebalanceo, backtest walk-forward sin look-ahead, caso
+Alimentos del Norte, calidad del dato, relojes y exportación trazable. Una de
+ellas contrasta Ledoit-Wolf con scikit-learn y se omite si esa librería no
+está instalada (no es dependencia del proyecto). La conexión real a Yahoo
+(P2-3, P2-4) y la reproducción/defensa (P2-36) se verifican aparte: un mock no
 acredita una conexión real.
+
+Para reproducir exactamente el entorno con el que se probó:
+`pip install -r requirements-lock.txt` (versiones fijadas tras probar).
 
 La suite de la v1 cubre T-01 a T-17 (cálculo de rendimientos, estadísticas
 descriptivas, remuestreo, modelos de pronóstico, validación walk-forward,
@@ -123,6 +128,12 @@ src/black_litterman.py # v2: prior, views, posterior y matriz predictiva
 src/rebalance.py # v2: libro de posiciones, deriva, costos y política de rebalanceo simulado
 src/capm.py # v2: beta OLS, Hamada, Ke, WACC, FCFF y valor terminal
 src/market.py # v2: cotización en línea (barras de 1 minuto) con antigüedad del dato
+src/backtest.py # v2: evaluación walk-forward de estrategias (sin look-ahead)
+src/stress.py # v2: escenarios de estrés, escenario inverso, VaR y concentración
+src/estimators.py # v2: covarianza Ledoit-Wolf y EWMA
+src/data_quality.py # v2: calendario y huecos, barras completas, conversión a COP
+src/trace.py # v2: traza de ejecución y verificación de la exportación
+requirements-lock.txt # versiones exactas con las que se ejecutaron las pruebas
 laboratorio_v2.py # v2: interfaz del laboratorio de portafolios
 paquete_v2/ # material docente v2 (no se modifica; verificado con su manifiesto SHA256)
 src/charts.py # gráficos y mapa histórico rendimiento-riesgo
