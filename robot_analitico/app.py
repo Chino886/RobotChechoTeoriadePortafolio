@@ -172,7 +172,7 @@ DISCLAIMER_TEXT = (
 
 INSTITUTION = "Tech Business School – Universidad EIA"
 # Título del laboratorio v2 en el menú superior y en su página (el equipo lo va a renombrar).
-LAB_TITLE = "Laboratorio de portafolios v2"
+LAB_TITLE = "Laboratorio de portafolios"
 
 def _logo_b64() -> str:
     try:
@@ -211,10 +211,10 @@ NAV_CSS = """
     font-size: 1.02rem; font-weight: 600; color: #B8C0D0;
 }
 .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"][aria-selected="true"] {
-    background: rgba(0, 255, 163, 0.10);
+    background: rgba(235, 195, 94, 0.12);
 }
 .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"][aria-selected="true"] p {
-    color: #00FFA3;
+    color: #EBC35E;
 }
 .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"] .react-aria-SelectionIndicator {
     display: none;
@@ -224,6 +224,14 @@ NAV_CSS = """
     .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] { position: static; }
 }
 
+/* Botones principales dorados con texto oscuro (como "Empezar ahora"). */
+[data-testid="stBaseButton-primary"] {
+    background: linear-gradient(180deg, #F2CF6E, #D9AE45); color: #0B1220; border: none; font-weight: 700;
+    border-radius: 10px;
+}
+[data-testid="stBaseButton-primary"] p { color: #0B1220; font-weight: 700; }
+[data-testid="stBaseButton-primary"]:hover { filter: brightness(1.06); color: #0B1220; }
+
 /* Encabezado de cada página */
 .dpst-page-title { margin: 0.4rem 0 0; font-size: 1.7rem; font-weight: 800; letter-spacing: -0.02em; }
 .dpst-page-sub { color: #8B93A7; margin: 0.15rem 0 0.4rem; }
@@ -231,15 +239,15 @@ NAV_CSS = """
 /* Inicio */
 .dpst-hero {
     padding: 2rem 2rem 1.6rem; border-radius: 18px; border: 1px solid rgba(255,255,255,0.07);
-    background: radial-gradient(1200px 300px at 0% 0%, rgba(0,255,163,0.14), transparent 60%),
-                radial-gradient(900px 300px at 100% 0%, rgba(45,225,252,0.12), transparent 60%), #0F1624;
+    background: radial-gradient(1200px 300px at 0% 0%, rgba(235,195,94,0.14), transparent 60%),
+                radial-gradient(900px 300px at 100% 0%, rgba(246,222,154,0.06), transparent 60%), #0F1624;
 }
 .dpst-hero h1 { margin: 0.4rem 0 0.2rem; font-size: 2.6rem; }
 .dpst-hero .sub { font-size: 1.1rem; color: #C9D1E0; }
 .dpst-hero .meta { color: #8B93A7; font-size: 0.9rem; margin-top: 0.6rem; }
 .dpst-pill {
     display: inline-block; padding: 0.2rem 0.7rem; border-radius: 999px; font-size: 0.78rem; font-weight: 700;
-    color: #0B1220; background: #00FFA3; letter-spacing: 0.03em;
+    color: #0B1220; background: #EBC35E; letter-spacing: 0.03em;
 }
 .dpst-notice {
     margin-top: 0.6rem; padding: 1.1rem 1.3rem; border-radius: 14px; border: 1px solid rgba(255, 196, 0, 0.35);
@@ -351,8 +359,8 @@ def render_sidebar_style() -> None:
             margin-bottom: 0.5rem;
             border-radius: 12px 12px 0 0;
             border: 1px solid rgba(255, 255, 255, 0.08);
-            border-bottom: 2px solid #00FFA3;
-            background: linear-gradient(135deg, rgba(0, 255, 163, 0.12), rgba(45, 225, 252, 0.08));
+            border-bottom: 2px solid #EBC35E;
+            background: linear-gradient(135deg, rgba(235, 195, 94, 0.12), rgba(246, 222, 154, 0.06));
             font-size: 1.25rem;
             font-weight: 700;
             color: #E6E6E6;
@@ -932,10 +940,10 @@ def render_comparison() -> None:
             risk_return_map(result.summaries, non_dominated, starred_value), use_container_width=True
         )
         st.caption(
-            "Rombos verdes = activos NO dominados (ningún otro activo del lote ofrece a la "
+            "Rombos dorados = activos NO dominados (ningún otro activo del lote ofrece a la "
             "vez media igual o mayor y volatilidad igual o menor). Esto no es una frontera "
             "eficiente de portafolios ni una recomendación de la mejor inversión universal. "
-            "La estrella dorada solo marca tu elección personal; no es un criterio de preselección."
+            "La estrella blanca solo marca tu elección personal; no es un criterio de preselección."
         )
 
     with tab_select:

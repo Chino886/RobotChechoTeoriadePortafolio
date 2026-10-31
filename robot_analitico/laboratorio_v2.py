@@ -31,7 +31,7 @@ from src.capm import (
     wacc,
 )
 from src.backtest import ALL_STRATEGIES, ESTIMATORS, BacktestConfig, select_by_validation, walk_forward
-from src.charts import DARK_LAYOUT, ELECTRIC_BLUE, NEON_GREEN, STAR_GOLD
+from src.charts import DARK_LAYOUT, ELECTRIC_BLUE, ACCENT_GOLD, STAR_WHITE
 from src.data import fetch_asset_data, resample_prices
 from src.data_quality import calendar_report, gap_safe_simple_returns, last_bar_age
 from src.estimators import ewma_covariance, ledoit_wolf
@@ -178,7 +178,7 @@ INDICATORS_HELP = """
 def _heatmap(matrix: pd.DataFrame, title: str, zmid=None, fmt=".2f"):
     fig = go.Figure(go.Heatmap(
         z=matrix.to_numpy(), x=list(matrix.columns), y=list(matrix.index), zmid=zmid,
-        colorscale=[[0, "#2DE1FC"], [0.5, "#1A1F2B"], [1, "#00FFA3"]] if zmid is not None else "Teal",
+        colorscale=[[0, "#2DE1FC"], [0.5, "#1A1F2B"], [1, "#EBC35E"]] if zmid is not None else "Teal",
         texttemplate="%{z:" + fmt + "}" if len(matrix) <= 12 else None, hoverongaps=False,
     ))
     fig.update_layout(title=title, height=420 if len(matrix) > 6 else 320, **LAYOUT)
@@ -237,7 +237,7 @@ def _render_live_quote():
         st.dataframe(pd.DataFrame(rows).set_index("ticker"))
         first = next((current[t] for t in tickers if t in current and current[t].ok and current[t].bars is not None), None)
         if first is not None:
-            fig = go.Figure(go.Scatter(x=first.bars.index, y=first.bars.values, mode="lines", line=dict(color=NEON_GREEN),
+            fig = go.Figure(go.Scatter(x=first.bars.index, y=first.bars.values, mode="lines", line=dict(color=ACCENT_GOLD),
                                        name=first.ticker))
             fig.update_layout(title=f"{first.ticker}: barras de 1 minuto (la última puede estar incompleta)", height=300, **LAYOUT)
             st.plotly_chart(fig)
@@ -306,7 +306,7 @@ def _tab_risk(lab: LabData):
         st.info("La cartera no tiene riesgo estimado: las contribuciones no se calculan (no se divide por cero).")
     else:
         fig = go.Figure(go.Bar(x=list(rc.percent.index), y=rc.percent.to_numpy(),
-                               marker_color=[NEON_GREEN if v >= 0 else ELECTRIC_BLUE for v in rc.percent]))
+                               marker_color=[ACCENT_GOLD if v >= 0 else ELECTRIC_BLUE for v in rc.percent]))
         fig.update_layout(title="Contribución de cada activo al riesgo (% de la volatilidad)", yaxis_tickformat=".0%", height=320, **LAYOUT)
         st.plotly_chart(fig)
 
@@ -333,7 +333,7 @@ def _tab_risk(lab: LabData):
         for col in vol.columns:
             is_p = col == "cartera"
             fig.add_trace(go.Scatter(x=vol.index, y=vol[col], name=col, mode="lines",
-                                     line=dict(width=3 if is_p else 1, color=NEON_GREEN if is_p else None),
+                                     line=dict(width=3 if is_p else 1, color=ACCENT_GOLD if is_p else None),
                                      opacity=1 if is_p else 0.45))
         fig.update_layout(title=f"Volatilidad móvil anualizada ({window} obs.) — cartera vs. activos", yaxis_tickformat=".0%",
                           height=360, **LAYOUT)
@@ -346,7 +346,7 @@ def _tab_risk(lab: LabData):
         dd = drawdown_from_returns(rp)
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=rcorr.index, y=rcorr, name=f"corr {x}-{y}", line=dict(color=ELECTRIC_BLUE)))
-        fig.add_trace(go.Scatter(x=dd.index, y=dd, name="drawdown cartera", line=dict(color=NEON_GREEN), yaxis="y2"))
+        fig.add_trace(go.Scatter(x=dd.index, y=dd, name="drawdown cartera", line=dict(color=ACCENT_GOLD), yaxis="y2"))
         fig.update_layout(title="Correlación móvil y caída desde el máximo (drawdown) de la cartera", height=340,
                           yaxis=dict(title="correlación", range=[-1, 1]),
                           yaxis2=dict(title="drawdown", overlaying="y", side="right", tickformat=".0%"), **LAYOUT)
@@ -488,7 +488,7 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None
         fig.add_trace(go.Scatter(x=ann_vol(cloud["volatilidad"]), y=ann_mu(cloud["media"]), mode="markers",
                                  name=cloud.attrs.get("etiqueta", "Carteras al azar (ilustrativas)"),
                                  marker=dict(size=3, color="rgba(230,230,230,0.18)"), hoverinfo="skip"))
-    for branch, color, dash in (("eficiente", NEON_GREEN, None), ("no eficiente", ELECTRIC_BLUE, "dot")):
+    for branch, color, dash in (("eficiente", ACCENT_GOLD, None), ("no eficiente", ELECTRIC_BLUE, "dot")):
         part = frontier[(frontier["rama"] == branch) & (frontier["estado"] == "óptimo")]
         if not part.empty:
             fig.add_trace(go.Scatter(x=ann_vol(part["volatilidad"]), y=ann_mu(part["objetivo"]), mode="lines",
@@ -496,7 +496,7 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None
     if tangent.ok:
         ys = np.linspace(0, 1, 20)
         fig.add_trace(go.Scatter(x=ann_vol(ys * tangent.volatility), y=[ann_mu(rf + y * (tangent.mean - rf)) for y in ys],
-                                 mode="lines", name="CAL (rf → tangente, sin deuda)", line=dict(color=STAR_GOLD, dash="dash")))
+                                 mode="lines", name="CAL (rf → tangente, sin deuda)", line=dict(color=STAR_WHITE, dash="dash")))
     show_cml = st.toggle("Mostrar CML aproximada (proxy de mercado = 1/N del universo; decisión del equipo)", value=False,
                          key="lab_cml")
     if show_cml:
@@ -510,8 +510,8 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None
                                      mode="lines", name="CML aproximada (proxy 1/N)", line=dict(color="#FF6B6B", dash="dot")))
             fig.add_trace(go.Scatter(x=[ann_vol(ps.volatility)], y=[ann_mu(ps.mean)], mode="markers", name="Proxy de mercado (1/N)",
                                      marker=dict(size=11, symbol="x", color="#FF6B6B")))
-    for res, symbol, color in ((gmv, "diamond", ELECTRIC_BLUE), (tangent, "star", STAR_GOLD),
-                               (personal, "circle", "#FF6B6B"), (top, "triangle-up", NEON_GREEN)):
+    for res, symbol, color in ((gmv, "diamond", ELECTRIC_BLUE), (tangent, "star", STAR_WHITE),
+                               (personal, "circle", "#FF6B6B"), (top, "triangle-up", ACCENT_GOLD)):
         if res.ok:
             fig.add_trace(go.Scatter(x=[ann_vol(res.volatility)], y=[ann_mu(res.mean)], mode="markers", name=res.name,
                                      marker=dict(size=15, symbol=symbol, color=color, line=dict(width=1, color="white"))))
@@ -556,7 +556,7 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None
         )
 
     _explain("¿Qué significa cada cartera y cada línea?", """
-- **Frontera eficiente (verde):** para cada rendimiento objetivo, la cartera de **menor riesgo posible** dentro de las
+- **Frontera eficiente (dorada):** para cada rendimiento objetivo, la cartera de **menor riesgo posible** dentro de las
   reglas de pesos. Se calcula resolviendo una optimización por cada punto, no con la nube de puntos.
 - **Frontera no eficiente (azul punteada):** la parte de abajo de la curva: mismo riesgo pero **menos** rendimiento.
   Nadie racional elegiría esas carteras; se muestra para entender la forma completa.
@@ -570,7 +570,7 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None
   equipo**: γ alto castiga más el riesgo y lleva hacia la mínima varianza; γ bajo, hacia el máximo rendimiento.
 - **Máximo rendimiento esperado (triángulo):** el mayor w'μ posible; suele concentrarse en un solo activo. Sin límites a
   los pesos sería **no acotado** (apalancamiento infinito).
-- **CAL (línea dorada):** combinaciones entre el activo libre de riesgo y la tangente. Su pendiente es el Sharpe.
+- **CAL (línea blanca punteada):** combinaciones entre el activo libre de riesgo y la tangente. Su pendiente es el Sharpe.
 - **Estados:** "inviable" = las reglas no se pueden cumplir; "no acotado" = sin límite; "premio no positivo" = ninguna
   cartera supera rf. Son situaciones distintas y se muestran tal cual.
 - **CML y SML:** la CML supone un portafolio de **mercado** eficiente (equilibrio). Con un universo limitado no
@@ -991,8 +991,8 @@ def _tab_backtest(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None)
     fig = go.Figure()
     for name, run in res.runs.items():
         fig.add_trace(go.Scatter(x=run.wealth.index, y=run.wealth, mode="lines", name=name))
-    fig.add_vline(x=res.test_start, line=dict(color=STAR_GOLD, dash="dash"))
-    fig.add_annotation(x=res.test_start, y=1, yref="paper", text="inicio prueba final", showarrow=False, font=dict(color=STAR_GOLD))
+    fig.add_vline(x=res.test_start, line=dict(color=STAR_WHITE, dash="dash"))
+    fig.add_annotation(x=res.test_start, y=1, yref="paper", text="inicio prueba final", showarrow=False, font=dict(color=STAR_WHITE))
     fig.update_layout(title="Valor neto de costos (empieza en 1)", height=420, **LAYOUT)
     st.plotly_chart(fig)
     pct_cols = ["rendimiento anual (CAGR)", "volatilidad anual", "máximo drawdown", "rendimiento acumulado",
@@ -1187,10 +1187,10 @@ def _tab_capm(lab: LabData):
     erp = params["erp_madura"]
     xs = np.linspace(0, 2, 20)
     fig = go.Figure(go.Scatter(x=xs, y=[sml_required_return(params["rf_USD"], x, erp) for x in xs], name="SML",
-                               line=dict(color=NEON_GREEN)))
+                               line=dict(color=ACCENT_GOLD)))
     for label, b in (("Comparable", beta_c.beta), ("Empresa (reapalancada)", beta_l), ("Desapalancada", beta_u)):
         fig.add_trace(go.Scatter(x=[b], y=[sml_required_return(params["rf_USD"], b, erp)], mode="markers+text", text=[label],
-                                 textposition="top left", marker=dict(size=11, color=STAR_GOLD), showlegend=False))
+                                 textposition="top left", marker=dict(size=11, color=STAR_WHITE), showlegend=False))
     fig.update_layout(title="SML del caso (USD, sin prima país)", xaxis_title="Beta", yaxis_title="Rendimiento requerido",
                       yaxis_tickformat=".0%", height=360, **LAYOUT)
     st.plotly_chart(fig)
