@@ -10,12 +10,8 @@ política de rebalanceo, benchmark, proyecciones) son del equipo: aquí son
 entradas editables, con valores iniciales tomados del caso docente de
 control y rotulados como tales.
 """
-import hashlib
 import json
-import platform
-import subprocess
-import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -23,7 +19,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.black_litterman import View, absolute_total_to_excess, build_view_set, implied_prior, posterior
+from src.black_litterman import View, ViewSet, absolute_total_to_excess, build_view_set, implied_prior, posterior
 from src.capm import (
     beta_ols,
     cost_of_equity,
@@ -37,9 +33,12 @@ from src.capm import (
     unlever_beta,
     wacc,
 )
+from src.backtest import ALL_STRATEGIES, BacktestConfig, walk_forward
 from src.charts import DARK_LAYOUT, ELECTRIC_BLUE, NEON_GREEN, STAR_GOLD
 from src.data import fetch_asset_data, resample_prices
-from src.market import fetch_quote, format_age
+from src.data_quality import calendar_report, gap_safe_simple_returns, last_bar_age
+from src.estimators import ewma_covariance, ledoit_wolf
+from src.market import fetch_quotes, format_age
 from src.portfolio import (
     correlation_matrix,
     covariance_matrix,
@@ -59,10 +58,20 @@ from src.portfolio import (
     risk_contributions,
     rolling_correlation,
     rolling_volatility,
-    simple_returns_matrix,
     weighted_average_volatility,
 )
-from src.rebalance import Book, plan_rebalance
+from src.rebalance import ACTION_REBALANCE, Book, MarketEvent, RebalancePolicy, Rebalancer, plan_rebalance
+from src.stress import (
+    concentration,
+    correlation_breakdown,
+    historical_var,
+    individual_shocks,
+    joint_worst_historical,
+    parametric_var,
+    reverse_stress,
+    worst_historical_portfolio_period,
+)
+from src.trace import build_trace, export_bundle, snapshot_csv, verify_bundle
 
 PAQUETE_DATA = Path(__file__).parent / "paquete_v2" / "data"
 
@@ -84,7 +93,8 @@ def _load_json(name: str) -> dict:
 class LabData:
     """mu y Sigma en la frecuencia nativa, más la muestra de retornos si existe."""
 
-    def __init__(self, source, mu, sigma, periods_per_year, returns=None, n_before=None, label=""):
+    def __init__(self, source, mu, sigma, periods_per_year, returns=None, n_before=None, label="",
+                 frequency=None, calendar=None, gap_removed=0, last_date=None):
         self.source = source
         self.mu = mu
         self.sigma = sigma
@@ -92,6 +102,10 @@ class LabData:
         self.returns = returns
         self.n_before = n_before
         self.label = label
+        self.frequency = frequency
+        self.calendar = calendar
+        self.gap_removed = gap_removed
+        self.last_date = last_date
 
 
 def _load_lab_data(source: str):
@@ -102,21 +116,30 @@ def _load_lab_data(source: str):
         return LabData(source, mu, sigma, 1, label="Parámetros anuales dados por el caso (no hay serie de precios).")
     if source == SOURCE_SYNTH:
         prices = pd.read_csv(PAQUETE_DATA / "precios_sinteticos_20.csv", parse_dates=["fecha"]).set_index("fecha")
-        return prices, 252, "Calendario lunes-viernes didáctico (NO bursátil); 252 periodos por año como convención."
+        return prices, 252, "Calendario lunes-viernes didáctico (NO bursátil); 252 periodos por año como convención.", "Diaria"
     result = st.session_state.get("comparison_result")
     if result is None or not getattr(result, "ok", False) or not result.common_prices:
         return None
     prices = pd.DataFrame(result.common_prices).sort_index()
     return prices, result.periods_per_year, (
-        f"Precios de la sección Comparación: frecuencia {result.frequency}, moneda {result.base_currency}, "
-        f"{result.common_start.date()} a {result.common_end.date()}."
-    )
+        f"Precios de cierre ajustado (auto_adjust=True: incluye dividendos y splits) de la sección Comparación: "
+        f"frecuencia {result.frequency}, moneda {result.base_currency}, {result.common_start.date()} a {result.common_end.date()}."
+    ), result.frequency
 
 
-def _from_prices(source, prices, m, label, assets):
-    sample = simple_returns_matrix(prices[assets])
-    returns = sample.returns
-    return LabData(source, returns.mean(), covariance_matrix(returns), m, returns, sample.n_before, label)
+def _from_prices(source, prices, m, label, assets, frequency):
+    """
+    Rendimientos simples sin rellenar huecos; los que cruzan un intervalo
+    anormal se anulan; después se aplica la máscara común (guía 3.2).
+    """
+    sub = prices[assets].sort_index()
+    raw, removed = gap_safe_simple_returns(sub, frequency)
+    returns = raw.dropna(how="any")
+    if len(returns) < 2:
+        raise ValueError("No quedan observaciones comunes suficientes tras la limpieza.")
+    return LabData(source, returns.mean(), covariance_matrix(returns), m, returns, len(raw), label,
+                   frequency=frequency, calendar=calendar_report(sub, frequency), gap_removed=removed,
+                   last_date=sub.index[-1])
 
 
 # ---------------------------------------------------------------------------
@@ -142,14 +165,6 @@ def _heatmap(matrix: pd.DataFrame, title: str, zmid=None, fmt=".2f"):
     return fig
 
 
-def _git_commit() -> str:
-    try:
-        out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=Path(__file__).parent, capture_output=True, text=True, timeout=5)
-        return out.stdout.strip() or "no disponible"
-    except Exception:
-        return "no disponible"
-
-
 # ---------------------------------------------------------------------------
 # Cotización en línea (reloj de cotización)
 # ---------------------------------------------------------------------------
@@ -163,39 +178,55 @@ def _render_live_quote():
     )
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
-        ticker = st.text_input("Ticker a seguir", value="AAPL", key="lab_quote_ticker")
+        raw = st.text_input("Tickers a seguir (separados por coma, hasta 20)", value="AAPL", key="lab_quote_tickers")
     with c2:
         every = st.number_input("Actualizar cada (s)", min_value=15, max_value=600, value=60, step=15, key="lab_quote_every")
     with c3:
         auto = st.toggle("Actualización automática", value=False, key="lab_quote_auto")
+    tickers = [t.strip().upper() for t in raw.split(",") if t.strip()][:20]
 
     @st.fragment(run_every=timedelta(seconds=int(every)) if auto else None)
     def _quote_panel():
-        if not auto and not st.button("Consultar ahora", key="lab_quote_btn"):
-            last = st.session_state.get("lab_last_quote")
-            if last is None or last.ticker != (ticker or "").strip().upper():
+        clicked = st.button("Consultar ahora", key="lab_quote_btn")
+        previous = st.session_state.get("lab_last_quotes", {})
+        if auto or clicked:
+            quotes = fetch_quotes(tickers)
+            current = {q.ticker: q for q in quotes}
+            st.session_state["lab_last_quotes"] = {**previous, **{t: q for t, q in current.items() if q.ok}}
+            st.session_state["lab_quote_log"] = (st.session_state.get("lab_quote_log", []) + [
+                {"consulta": q.received_at, "ticker": q.ticker, "precio": q.price, "última barra": q.last_bar_at,
+                 "repetido": q.same_data_as(previous.get(q.ticker)), "estado": "ok" if q.ok else q.error}
+                for q in quotes])[-200:]
+        else:
+            current = {t: previous[t] for t in tickers if t in previous}
+            if not current:
                 st.caption("Pulsa «Consultar ahora» o activa la actualización automática.")
                 return
-            q, repeated = last, None
-        else:
-            prev = st.session_state.get("lab_last_quote")
-            q = fetch_quote(ticker)
-            repeated = q.same_data_as(prev)
-            if q.ok:
-                st.session_state["lab_last_quote"] = q
-        if not q.ok:
-            st.error(f"{q.ticker}: {q.error}")
-            return
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric(f"{q.ticker} ({q.currency or 'N/D'})", f"{q.price:,.4f}")
-        m2.metric("Antigüedad del dato", format_age(q.age_seconds))
-        m3.metric("Sesión", q.session)
-        m4.metric("Bolsa", q.exchange or "N/D")
-        st.caption(
-            f"Tipo de precio: {q.price_type}. Última barra: {q.last_bar_at:%Y-%m-%d %H:%M} UTC · "
-            f"recibido: {q.received_at:%Y-%m-%d %H:%M:%S} UTC · zona de la bolsa: {q.timezone or 'N/D'}."
-            + (" · ⏸️ Dato repetido: no es una observación nueva." if repeated else "")
-        )
+        rows = []
+        for t in tickers:
+            q = current.get(t)
+            if q is None:
+                continue
+            if not q.ok:
+                rows.append({"ticker": t, "precio": None, "moneda": None, "antigüedad": None, "sesión": None, "bolsa": None,
+                             "última barra (UTC)": None, "estado": f"❌ {q.error}"})
+                continue
+            rows.append({"ticker": t, "precio": q.price, "moneda": q.currency, "antigüedad": format_age(q.age_seconds),
+                         "sesión": q.session, "bolsa": q.exchange, "última barra (UTC)": q.last_bar_at.strftime("%Y-%m-%d %H:%M"),
+                         "estado": "⏸️ repetido" if (auto or clicked) and q.same_data_as(previous.get(t)) else "✅ ok"})
+        st.dataframe(pd.DataFrame(rows).set_index("ticker"))
+        first = next((current[t] for t in tickers if t in current and current[t].ok and current[t].bars is not None), None)
+        if first is not None:
+            fig = go.Figure(go.Scatter(x=first.bars.index, y=first.bars.values, mode="lines", line=dict(color=NEON_GREEN),
+                                       name=first.ticker))
+            fig.update_layout(title=f"{first.ticker}: barras de 1 minuto (la última puede estar incompleta)", height=300, **LAYOUT)
+            st.plotly_chart(fig)
+            st.caption(f"Tipo de precio: {first.price_type}. Recibido: {first.received_at:%Y-%m-%d %H:%M:%S} UTC · "
+                       f"zona de la bolsa: {first.timezone or 'N/D'}.")
+        log = st.session_state.get("lab_quote_log", [])
+        if log:
+            with st.expander(f"Registro de consultas de esta sesión ({len(log)}) — evidencia de consultas sucesivas"):
+                st.dataframe(pd.DataFrame(log))
 
     _quote_panel()
 
@@ -224,6 +255,17 @@ def _tab_risk(lab: LabData):
     )
     if diag.zero_variance_assets:
         st.warning(f"Varianza cero (correlación indefinida): {', '.join(diag.zero_variance_assets)}")
+    if lab.calendar is not None:
+        age = last_bar_age(pd.DatetimeIndex([lab.last_date]))
+        issues = lab.calendar
+        with st.expander(f"🔎 Calidad del dato: {len(issues)} observación(es) · {lab.gap_removed} rendimiento(s) anulados por huecos · "
+                         f"último dato hace {age:.1f} días"):
+            st.caption("Un hueco mayor al normal para la frecuencia no se convierte en un rendimiento de un periodo: se anula "
+                       "antes de la máscara común. También se reportan fechas duplicadas, precios no positivos y precios estancados.")
+            if issues.empty:
+                st.success("Sin huecos, duplicados ni precios estancados.")
+            else:
+                st.dataframe(issues)
     c1, c2 = st.columns(2)
     c1.plotly_chart(_heatmap(lab.sigma * m, "Covarianza anualizada (decimal²)", fmt=".4f"))
     c2.plotly_chart(_heatmap(corr, "Correlación (sin unidad)", zmid=0))
@@ -232,7 +274,7 @@ def _tab_risk(lab: LabData):
     w = _weights_editor(list(lab.mu.index), "lab_risk_weights")
     if abs(w.sum() - 1) > 1e-6:
         st.error(f"Los pesos suman {w.sum():.4f}: una cartera necesita pesos que sumen 1.")
-        return
+        return None
     stats = portfolio_stats(w, lab.mu, lab.sigma)
     rc = risk_contributions(w, lab.sigma)
     a, b, c = st.columns(3)
@@ -247,6 +289,19 @@ def _tab_risk(lab: LabData):
                                marker_color=[NEON_GREEN if v >= 0 else ELECTRIC_BLUE for v in rc.percent]))
         fig.update_layout(title="Contribución de cada activo al riesgo (% de la volatilidad)", yaxis_tickformat=".0%", height=320, **LAYOUT)
         st.plotly_chart(fig)
+
+    conc = concentration(w)
+    a, b, c, d = st.columns(4)
+    a.metric("Concentración (HHI)", f"{conc.hhi:.3f}", help="Σw². 1/N = lo más diversificado posible; 1 = un solo activo.")
+    b.metric("N efectivo de activos", f"{conc.effective_n:.1f}", help="1/HHI: cuántos activos 'iguales' equivale la cartera.")
+    c.metric("Mayor peso", f"{conc.max_asset}: {conc.max_weight:.0%}")
+    d.metric("VaR paramétrico 95 % (1 periodo)", _pct(parametric_var(stats.mean, stats.volatility, 0.95)),
+             help="Pérdida que no se supera con 95 % de confianza en un periodo, suponiendo normalidad.")
+    if lab.returns is not None:
+        rp_hist = portfolio_return_series(lab.returns, w)
+        st.caption(f"VaR histórico 95 % / 99 % (1 periodo): {_pct(historical_var(rp_hist, 0.95))} / "
+                   f"{_pct(historical_var(rp_hist, 0.99))} · VaR paramétrico 99 %: "
+                   f"{_pct(parametric_var(stats.mean, stats.volatility, 0.99))}.")
 
     if lab.returns is not None and len(lab.returns) > 30:
         window = st.slider("Ventana móvil (observaciones)", 10, min(250, len(lab.returns) - 1), min(60, len(lab.returns) // 3),
@@ -291,19 +346,116 @@ def _tab_risk(lab: LabData):
   activos idénticos) no tiene inversa y algunos cálculos analíticos no aplican; se informa, no se repara en silencio.
 - **Retornos simples vs. logarítmicos:** para la cartera se usan retornos simples, porque R_p = Σ w_i R_i. Con +10 % y
   −10 % a partes iguales la cartera rinde 0 %, pero el promedio de los logaritmos da negativo: no son lo mismo.
+- **Concentración (HHI y N efectivo):** si casi todo el peso está en pocos activos, la cartera depende de ellos aunque
+  haya muchos en la lista. N efectivo = 1/Σw².
+- **VaR:** pérdida que no se supera con cierta confianza en un periodo. El paramétrico supone normalidad; el histórico
+  usa las pérdidas que de verdad ocurrieron en la muestra.
+""")
+    return w
+
+
+def _tab_stress(lab: LabData, w, bounds, groups):
+    if w is None:
+        st.info("Define una cartera válida en la pestaña «Riesgo conjunto» (pesos que sumen 1).")
+        return
+    m = lab.m
+    st.markdown("#### Escenarios de estrés sobre la cartera de «Riesgo conjunto»")
+    st.caption("Los tamaños de los shocks y el límite de pérdida del mandato son decisiones del equipo; los valores de las "
+               "cajas son solo ejemplos para explorar.")
+    c1, c2, c3 = st.columns(3)
+    shock = c1.number_input("Shock individual (caída de un activo)", value=-0.20, max_value=0.0, step=0.05, format="%.2f", key="lab_st_shock")
+    rho = c2.number_input("Ruptura: correlación forzada", value=0.90, min_value=-0.99, max_value=1.0, step=0.05, format="%.2f", key="lab_st_rho")
+    loss_limit = c3.number_input("Pérdida máxima del mandato (escenario inverso)", value=0.10, min_value=0.001, step=0.01,
+                                 format="%.3f", key="lab_st_loss")
+
+    ind = individual_shocks(w, shock).sort_values(ascending=False)
+    fig = go.Figure(go.Bar(x=list(ind.index), y=ind.to_numpy(), marker_color=ELECTRIC_BLUE))
+    fig.update_layout(title=f"Pérdida de la cartera si cada activo, por separado, cae {abs(shock):.0%}", yaxis_tickformat=".1%",
+                      height=300, **LAYOUT)
+    st.plotly_chart(fig)
+
+    base_vol = portfolio_stats(w, lab.mu, lab.sigma).volatility
+    rows = []
+    if lab.returns is not None:
+        joint, worst = joint_worst_historical(w, lab.returns)
+        rows.append(["Conjunto adverso: todos en su peor periodo histórico a la vez", _pct(joint),
+                     "Cota pesimista: en la muestra no ocurrieron el mismo día."])
+        loss_day, when = worst_historical_portfolio_period(w, lab.returns)
+        rows.append(["Peor periodo real de la cartera en la muestra", _pct(loss_day), f"{pd.Timestamp(when).date()}"])
+    try:
+        broken = correlation_breakdown(lab.sigma, rho)
+        vol_b = portfolio_stats(w, lab.mu, broken).volatility
+        rows.append([f"Ruptura de correlaciones (todas = {rho:.2f})", f"σ {_pct(base_vol * np.sqrt(m))} → {_pct(vol_b * np.sqrt(m))}",
+                     f"VaR 99 % de 1 periodo: {_pct(parametric_var(0, base_vol, 0.99))} → {_pct(parametric_var(0, vol_b, 0.99))}"])
+    except ValueError as exc:
+        rows.append(["Ruptura de correlaciones", "no válida", str(exc)])
+    st.dataframe(pd.DataFrame(rows, columns=["escenario", "resultado", "detalle"]), hide_index=True)
+
+    try:
+        rs = reverse_stress(w, lab.sigma, loss_limit)
+        st.markdown(f"**Escenario inverso:** para perder **{loss_limit:.1%}** en un periodo, la combinación de movimientos más "
+                    f"probable (dada la covarianza estimada) es la de la tabla. Equivale a un movimiento de **{rs.mahalanobis:.1f} "
+                    "desviaciones** conjuntas: más de 3 es muy raro bajo normalidad, pero las crisis lo superan.")
+        st.dataframe(rs.shocks.rename("shock por activo").to_frame().T.style.format("{:+.2%}"))
+    except ValueError as exc:
+        st.warning(str(exc))
+
+    if lab.returns is not None and len(lab.returns) > len(lab.mu) + 2:
+        st.markdown("#### Estimadores alternativos de Σ")
+        lam = st.number_input("λ de EWMA (decisión del equipo; 0,94 es la convención RiskMetrics para datos diarios)",
+                              value=0.94, min_value=0.5, max_value=0.999, step=0.01, format="%.3f", key="lab_ewma_lambda")
+        lw = ledoit_wolf(lab.returns)
+        variants = {"Muestral": lab.sigma, f"Ledoit-Wolf (intensidad {lw.intensity:.2f})": lw.sigma,
+                    f"EWMA (λ = {lam:.3f})": ewma_covariance(lab.returns, lam)}
+        rows, weights = [], {}
+        for name, sig in variants.items():
+            diag = diagnose_covariance(sig)
+            res = min_variance(lab.mu, sig, bounds, groups=groups)
+            rows.append({"estimador": name, "condicionamiento": diag.condition_number,
+                         "vol. GMV anual": res.volatility * np.sqrt(m) if res.ok else np.nan,
+                         "concentración GMV (HHI)": concentration(res.weights).hhi if res.ok else np.nan})
+            if res.ok:
+                weights[name] = res.weights
+        st.dataframe(pd.DataFrame(rows).set_index("estimador").style.format(
+            {"condicionamiento": "{:,.1f}", "vol. GMV anual": "{:.2%}", "concentración GMV (HHI)": "{:.3f}"}, na_rep="—"))
+        if weights:
+            wdf = pd.DataFrame(weights).T
+            fig = go.Figure([go.Bar(name=a, x=list(wdf.index), y=wdf[a]) for a in wdf.columns])
+            fig.update_layout(barmode="stack", title="Pesos de la mínima varianza según el estimador de Σ", yaxis_tickformat=".0%",
+                              height=340, **LAYOUT)
+            st.plotly_chart(fig)
+        st.caption("La estabilidad de cada estimador en el tiempo (rotación) se compara en la pestaña «Backtest». "
+                   "λ debe elegirse sin mirar el tramo de prueba final.")
+
+    _explain("¿Qué significan el estrés, el escenario inverso y los estimadores?", """
+- **Shock individual:** ¿cuánto pierde la cartera si **un** activo cae fuerte y los demás no se mueven?
+- **Conjunto adverso:** todos los activos en su peor momento histórico **a la vez**. Es pesimista a propósito.
+- **Ruptura de correlaciones:** en las crisis las correlaciones suben y la diversificación desaparece. Se conservan las
+  volatilidades y se fuerzan las correlaciones a un valor alto para ver cuánto sube el riesgo.
+- **Escenario inverso:** en vez de preguntar "¿qué pasa si…?", pregunta **"¿qué tendría que pasar para romper el
+  mandato?"**. Busca la combinación de movimientos más probable que produce esa pérdida.
+- **Ledoit-Wolf (shrinkage):** "encoge" la covarianza muestral hacia una más simple; reduce el ruido cuando hay muchos
+  activos para pocas observaciones y suele dar pesos más estables.
+- **EWMA:** da más peso a lo reciente (λ cerca de 1 = memoria larga). Reacciona más rápido a cambios de régimen.
 """)
 
 
-def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds):
+@st.cache_data(show_spinner=False, max_entries=20)
+def _cached_frontier(mu: pd.Series, sigma: pd.DataFrame, bounds: tuple, groups: tuple) -> pd.DataFrame:
+    """La frontera es lo más costoso (una optimización por punto): se reutiliza mientras no cambien datos ni cotas."""
+    return efficient_frontier(mu, sigma, list(bounds), n_points=30, groups=[(list(g), c) for g, c in groups] or None)
+
+
+def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None):
     m = lab.m
     rf = rf_per_period(rf_ea, m)
     with st.spinner("Optimizando..."):
-        gmv = min_variance(lab.mu, lab.sigma, bounds)
-        tangent = max_sharpe(lab.mu, lab.sigma, rf, bounds)
-        personal = personal_optimum(lab.mu, lab.sigma, gamma, bounds)
-        top = max_expected_return(lab.mu, bounds, lab.sigma)
-        frontier = efficient_frontier(lab.mu, lab.sigma, bounds, n_points=30)
-        cloud = random_portfolios(lab.mu, lab.sigma, bounds, n=1500)
+        gmv = min_variance(lab.mu, lab.sigma, bounds, groups=groups)
+        tangent = max_sharpe(lab.mu, lab.sigma, rf, bounds, groups=groups)
+        personal = personal_optimum(lab.mu, lab.sigma, gamma, bounds, groups=groups)
+        top = max_expected_return(lab.mu, bounds, lab.sigma, groups=groups)
+        frontier = _cached_frontier(lab.mu, lab.sigma, tuple(bounds), tuple((tuple(g), c) for g, c in (groups or [])))
+        cloud = random_portfolios(lab.mu, lab.sigma, bounds, n=1500) if not groups else pd.DataFrame()
 
     ann_mu, ann_vol = (lambda x: x * m), (lambda x: x * np.sqrt(m))
     fig = go.Figure()
@@ -319,6 +471,18 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds):
         ys = np.linspace(0, 1, 20)
         fig.add_trace(go.Scatter(x=ann_vol(ys * tangent.volatility), y=[ann_mu(rf + y * (tangent.mean - rf)) for y in ys],
                                  mode="lines", name="CAL (rf → tangente, sin deuda)", line=dict(color=STAR_GOLD, dash="dash")))
+    show_cml = st.toggle("Mostrar CML aproximada (proxy de mercado = 1/N del universo; decisión del equipo)", value=False,
+                         key="lab_cml")
+    if show_cml:
+        proxy = pd.Series(1 / len(lab.mu), index=lab.mu.index)
+        ps = portfolio_stats(proxy, lab.mu, lab.sigma)
+        if ps.volatility > 0:
+            x_max = max(ps.volatility, np.sqrt(np.diag(lab.sigma.to_numpy())).max())
+            xs = np.linspace(0, x_max, 20)
+            fig.add_trace(go.Scatter(x=ann_vol(xs), y=[ann_mu(rf + (ps.mean - rf) / ps.volatility * x) for x in xs], mode="lines",
+                                     name="CML aproximada (proxy 1/N)", line=dict(color="#FF6B6B", dash="dot")))
+            fig.add_trace(go.Scatter(x=[ann_vol(ps.volatility)], y=[ann_mu(ps.mean)], mode="markers", name="Proxy de mercado (1/N)",
+                                     marker=dict(size=11, symbol="x", color="#FF6B6B")))
     for res, symbol, color in ((gmv, "diamond", ELECTRIC_BLUE), (tangent, "star", STAR_GOLD),
                                (personal, "circle", "#FF6B6B"), (top, "triangle-up", NEON_GREEN)):
         if res.ok:
@@ -348,7 +512,8 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds):
         if not res.ok:
             st.warning(f"**{res.name}:** {res.status}. {res.message}")
     st.caption(f"Solver: {gmv.solver}. Residual de presupuesto de la GMV: {gmv.budget_residual:.1e}. "
-               f"rf del periodo = (1 + {rf_ea:.2%})^(1/{m}) − 1 = {rf:.6f}.")
+               f"rf del periodo = (1 + {rf_ea:.2%})^(1/{m}) − 1 = {rf:.6f}."
+               + (" Con topes por sector activos no se dibuja la nube al azar (no respetaría esos topes)." if groups else ""))
 
     if tangent.ok:
         y_free = optimal_risky_share(rf, tangent.mean, tangent.volatility, gamma)
@@ -379,18 +544,23 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds):
 - **CAL (línea dorada):** combinaciones entre el activo libre de riesgo y la tangente. Su pendiente es el Sharpe.
 - **Estados:** "inviable" = las reglas no se pueden cumplir; "no acotado" = sin límite; "premio no positivo" = ninguna
   cartera supera rf. Son situaciones distintas y se muestran tal cual.
-- **CML y SML:** la CML supone un portafolio de mercado eficiente (equilibrio); con un universo limitado se muestra la
-  CAL. La SML usa **beta** en el eje horizontal y está en la pestaña de CAPM.
+- **CML y SML:** la CML supone un portafolio de **mercado** eficiente (equilibrio). Con un universo limitado no
+  tenemos ese mercado, así que se muestra la CAL y, aparte y opcional, una **CML aproximada** que usa como proxy la
+  cartera 1/N del universo (el equipo debe justificar o cambiar ese proxy). La SML usa **beta** en el eje horizontal y
+  está en la pestaña de CAPM.
 """)
     return {"gmv": gmv, "tangent": tangent, "personal": personal, "top": top}
 
 
 def _views_editor(assets, default_views):
     st.markdown("**Opiniones (views) del equipo.** Déjalo vacío si no hay evidencia: no se inventa convicción.")
-    df = pd.DataFrame(default_views, columns=["id", "tipo", "activo", "contra", "Q", "Q es", "omega", "confianza", "vence", "tesis"])
-    df = df.astype({"id": "object", "tipo": "object", "activo": "object", "contra": "object", "Q es": "object", "tesis": "object",
-                    "Q": "float64", "omega": "float64", "confianza": "float64"})
+    cols = ["id", "tipo", "activo", "contra", "Q", "Q es", "omega", "confianza", "vence", "tesis", "fuente", "publicada",
+            "autor", "evidencia contraria"]
+    df = pd.DataFrame([v + [None] * (len(cols) - len(v)) for v in default_views], columns=cols)
+    df = df.astype({c: "object" for c in ["id", "tipo", "activo", "contra", "Q es", "tesis", "fuente", "autor", "evidencia contraria"]}
+                   | {"Q": "float64", "omega": "float64", "confianza": "float64"})
     df["vence"] = pd.to_datetime(df["vence"])
+    df["publicada"] = pd.to_datetime(df["publicada"])
     edited = st.data_editor(
         df, key="lab_bl_views", num_rows="dynamic", hide_index=True,
         column_config={
@@ -402,12 +572,14 @@ def _views_editor(assets, default_views):
             "omega": st.column_config.NumberColumn("Ω varianza (opcional)", format="%.6f"),
             "confianza": st.column_config.NumberColumn("confianza 0-1 (si no hay Ω)", min_value=0.0, max_value=1.0, format="%.2f"),
             "vence": st.column_config.DateColumn("vence"),
+            "publicada": st.column_config.DateColumn("publicada"),
+            "autor": st.column_config.TextColumn("autor (estudiante)"),
         },
     )
     return edited
 
 
-def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds):
+def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None):
     m = lab.m
     rf = rf_per_period(rf_ea, m)
     assets = list(lab.mu.index)
@@ -456,7 +628,13 @@ def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds):
         conf = None if pd.isna(r.get("confianza")) else float(r["confianza"])
         exp = r.get("vence")
         exp = None if exp is None or pd.isna(exp) else pd.Timestamp(exp).date()
-        views.append(View(str(r["id"]), p_row, q, omega=omega, confidence=conf, expires_at=exp, thesis=str(r.get("tesis") or "")))
+        views.append(View(str(r["id"]), p_row, q, omega=omega, confidence=conf, expires_at=exp, thesis=str(r.get("tesis") or ""),
+                          author="" if pd.isna(r.get("autor")) else str(r.get("autor"))))
+    incomplete = [str(r["id"]) for _, r in edited.dropna(subset=["id", "activo", "Q"]).iterrows()
+                  if any(pd.isna(r.get(c)) or str(r.get(c)).strip() == "" for c in ("fuente", "publicada", "autor", "evidencia contraria"))]
+    if incomplete and not is_control:
+        st.warning("Registro incompleto (fuente, fecha de publicación, autor o evidencia contraria) en: " + ", ".join(incomplete)
+                   + ". La guía exige registrarlos para cada view.")
 
     try:
         prior = implied_prior(lab.sigma, w_ref, delta)
@@ -477,8 +655,10 @@ def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds):
     if res.view_residuals is not None:
         st.caption("Residual P·μ_BL − Q por view (anual): " + ", ".join(f"{k}: {v * m:+.2%}" for k, v in res.view_residuals.items()))
 
+    st.session_state["lab_view_ids"] = list(vs.used)
+
     def opt(mu_excess, sigma, label):
-        return personal_optimum(mu_excess + rf, sigma, gamma, bounds), label
+        return personal_optimum(mu_excess + rf, sigma, gamma, bounds, groups=groups), label
 
     cases = [opt(lab.mu - rf, lab.sigma, "Histórico"), opt(res.prior, lab.sigma, "Prior (sin views)"),
              opt(res.posterior, lab.sigma, "Posterior BL (Σ fija)"),
@@ -500,6 +680,24 @@ def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds):
         st.caption("La comparación principal cambia solo μ (misma Σ y mismas cotas). La variante con Σ predictiva = Σ + M se "
                    "muestra aparte porque mezcla incertidumbre de la media con riesgo.")
 
+    if res.n_views:
+        st.markdown("**Sensibilidad:** ¿cuánto cambian la posterior y los pesos si las views son más o menos inciertas, o si τ cambia?")
+        rows = []
+        for label, k_omega, k_tau in (("Ω × 0,25 (más confianza)", 0.25, 1), ("Base", 1, 1), ("Ω × 4 (menos confianza)", 4, 1),
+                                      ("τ × 0,5", 1, 0.5), ("τ × 2", 1, 2)):
+            scaled = ViewSet(P=vs.P, Q=vs.Q, Omega=vs.Omega * k_omega, used=vs.used)
+            try:
+                alt = posterior(lab.sigma, res.prior, tau * k_tau, scaled)
+            except ValueError:
+                continue
+            o = personal_optimum(alt.posterior + rf, lab.sigma, gamma, bounds, groups=groups)
+            row = {"escenario": label} | {f"μ {a}": alt.posterior[a] * m for a in assets}
+            if o.ok:
+                row |= {f"w {a}": o.weights[a] for a in assets}
+            rows.append(row)
+        sens = pd.DataFrame(rows).set_index("escenario")
+        st.dataframe(sens.style.format("{:.2%}", na_rep="—"))
+
     _explain("¿Qué significa Black-Litterman?", """
 - **Idea:** en vez de confiar ciegamente en los rendimientos históricos (muy ruidosos), se parte de un **prior**: los
   rendimientos que "justificarían" una cartera de referencia, π = δ·Σ·w_ref. Luego se **mezclan** con las opiniones del
@@ -518,7 +716,7 @@ def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds):
     return res
 
 
-def _tab_rebalance(rf_ea: float):
+def _tab_rebalance(lab: LabData, gamma: float, bounds, groups=None):
     ctrl = _load_json("rebalanceo_control.json")
     st.caption("Simulación contable (paper trading): no hay bróker ni órdenes reales. Valores iniciales de "
                "rebalanceo_control.json (sintético). La política la define el equipo.")
@@ -577,7 +775,10 @@ def _tab_rebalance(rf_ea: float):
     if plan.cash_after < -1e-9:
         st.error("La operación dejaría caja negativa: no se permite deuda no autorizada.")
     st.caption(f"Patrimonio después de costos: {plan.equity_after:,.2f} (= {plan.equity_before:,.2f} − {plan.costs:,.2f}). "
-               "La evaluación temporal (walk-forward con varias estrategias) está pendiente.")
+               "La comparación de estrategias en el tiempo está en la pestaña «Backtest».")
+
+    if lab.returns is not None and len(lab.returns) > 60:
+        _policy_simulation(lab, gamma, bounds, groups, cost, band)
 
     _explain("¿Qué significa rebalancear y cómo se decide?", """
 - **Deriva:** si no haces nada, los pesos cambian solos porque cada activo rinde distinto: w_nuevo = w_anterior·(1+R_i)/(1+R_p).
@@ -590,6 +791,120 @@ def _tab_rebalance(rf_ea: float):
 - **Turnover:** ½·Σ|Δw|, qué porcentaje de la cartera "rotó".
 - **Caja:** nunca puede quedar negativa (eso sería endeudarse sin autorización). Con unidades enteras sobra algo de caja.
 - **Eventos repetidos** no generan una segunda operación, y datos viejos o precios desincronizados **suspenden** la decisión.
+""")
+
+
+def _policy_simulation(lab: LabData, gamma, bounds, groups, cost, band):
+    st.markdown("#### Simular la política en el tiempo (libro de eventos)")
+    st.caption("Cada periodo de la serie es un evento de precio. La política decide si opera, se abstiene o suspende; "
+               "todo queda registrado. Los parámetros son decisión del equipo (los valores son ejemplos).")
+    n_total = len(lab.returns)
+    c1, c2, c3, c4 = st.columns(4)
+    horizon = c1.number_input("Periodos a simular (los últimos)", min_value=20, max_value=n_total - 20,
+                              value=min(250, n_total // 2), step=10, key="lab_pol_h")
+    every = c2.number_input("Regla periódica: cada (días, 0 = no)", min_value=0, value=30, step=5, key="lab_pol_days")
+    wait = c3.number_input("Espera mínima entre operaciones (días)", min_value=0, value=5, step=1, key="lab_pol_wait")
+    max_turn = c4.number_input("Rotación máxima por decisión (0 = sin tope)", min_value=0.0, value=0.0, step=0.05,
+                               format="%.2f", key="lab_pol_turn")
+    target_kind = st.radio("Pesos objetivo", ["1/N", "Mínima varianza", "Óptimo personal (γ)"], horizontal=True, key="lab_pol_target")
+
+    sim = lab.returns.iloc[-int(horizon):]
+    est = lab.returns.iloc[: -int(horizon)]  # se estima ANTES de simular: sin mirar el tramo simulado
+    assets = list(lab.returns.columns)
+    if target_kind == "1/N":
+        target = pd.Series(1 / len(assets), index=assets)
+    else:
+        mu_e, sig_e = est.mean(), covariance_matrix(est)
+        res = (min_variance(mu_e, sig_e, bounds, groups=groups) if target_kind == "Mínima varianza"
+               else personal_optimum(mu_e, sig_e, gamma, bounds, groups=groups))
+        if not res.ok:
+            st.error(f"No se pudo calcular el objetivo: {res.status}. {res.message}")
+            return
+        target = res.weights
+    prices = 100 * (1 + sim).cumprod()
+    capital = 10_000.0
+    p0 = prices.iloc[0]
+    book = Book(quantities=target * capital / p0, cash=0.0)
+    policy = RebalancePolicy(cost_rate=cost, weight_band=band if band > 0 else None, calendar_days=int(every) or None,
+                             min_days_between=int(wait), max_turnover=max_turn or None)
+    reb = Rebalancer(policy=policy, book=book, target_weights=target, last_trade_at=pd.Timestamp(prices.index[0]).to_pydatetime())
+    for when, row in prices.iloc[1:].iterrows():
+        reb.on_event(MarketEvent(f"precio-{pd.Timestamp(when).date()}", pd.Timestamp(when).to_pydatetime(), row))
+    log = pd.DataFrame([{"evento": d.event_id, "acción": d.action, "motivo": d.reason,
+                         "costos": d.plan.costs if d.plan and d.action == ACTION_REBALANCE else 0.0,
+                         "rotación": d.plan.turnover if d.plan and d.action == ACTION_REBALANCE else 0.0} for d in reb.log])
+    hold_equity = float((book.quantities * prices.iloc[-1]).sum())
+    final_equity = reb.book.equity(prices.iloc[-1])
+    trades = log[log["acción"] == ACTION_REBALANCE]
+    st.session_state["lab_rebalance_ids"] = trades["evento"].tolist()
+    a, b, c, d = st.columns(4)
+    a.metric("Operaciones", len(trades))
+    b.metric("Abstenciones / suspensiones", f"{(log['acción'] != ACTION_REBALANCE).sum()}")
+    c.metric("Costos totales", f"{trades['costos'].sum():,.2f}")
+    d.metric("Patrimonio final vs. no operar", f"{final_equity:,.0f}", delta=f"{final_equity - hold_equity:,.0f}")
+    with st.expander("Ver el libro de eventos completo"):
+        st.dataframe(log.style.format({"costos": "{:,.2f}", "rotación": "{:.2%}"}), hide_index=True)
+    st.caption(f"Capital inicial {capital:,.0f}, comprado a los pesos objetivo en {pd.Timestamp(prices.index[0]).date()} "
+               "(sin costo, base común). El objetivo se estima con datos anteriores al tramo simulado.")
+
+
+def _tab_backtest(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None):
+    if lab.returns is None:
+        st.info("El backtest necesita una serie de rendimientos: elige el laboratorio sintético o los datos de mercado.")
+        return
+    n = len(lab.returns)
+    st.caption("Compara estrategias con el mismo universo, periodo, frecuencia de rebalanceo y costos. En cada fecha solo "
+               "se usa información anterior (sin mirar el futuro). Elijan los parámetros mirando la **validación**; la "
+               "**prueba final** se mira al final, una vez.")
+    c1, c2, c3, c4 = st.columns(4)
+    window = c1.number_input("Ventana de estimación (obs.)", min_value=len(lab.mu) + 5, max_value=max(n - 20, len(lab.mu) + 6),
+                             value=min(max(120, len(lab.mu) + 5), max(n - 20, len(lab.mu) + 6)), step=10, key="lab_bt_window")
+    every = c2.number_input("Rebalancear cada (periodos)", min_value=1, value=21 if lab.m >= 52 else 3, step=1, key="lab_bt_every")
+    cost = c3.number_input("Costo por nominal negociado", min_value=0.0, value=0.001, step=0.0005, format="%.4f", key="lab_bt_cost")
+    share = c4.slider("Fracción para validación", 0.2, 0.8, 0.5, 0.05, key="lab_bt_share")
+    strategies = st.multiselect("Estrategias", ALL_STRATEGIES, default=ALL_STRATEGIES, key="lab_bt_strats")
+    if not strategies:
+        return
+    if st.button("Ejecutar backtest", key="lab_bt_run", type="primary"):
+        cfg = BacktestConfig(window=int(window), rebalance_every=int(every), cost_rate=cost, rf_period=rf_per_period(rf_ea, lab.m),
+                             gamma=gamma, bounds=bounds, periods_per_year=lab.m, validation_share=share, groups=groups)
+        with st.spinner("Simulando..."):
+            try:
+                st.session_state["lab_bt_result"] = (walk_forward(lab.returns, cfg, strategies), tuple(lab.returns.columns))
+            except ValueError as exc:
+                st.error(str(exc))
+                return
+    stored = st.session_state.get("lab_bt_result")
+    if not stored or stored[1] != tuple(lab.returns.columns):
+        st.caption("Pulsa «Ejecutar backtest» (puede tardar unos segundos con muchos activos).")
+        return
+    res = stored[0]
+    fig = go.Figure()
+    for name, run in res.runs.items():
+        fig.add_trace(go.Scatter(x=run.wealth.index, y=run.wealth, mode="lines", name=name))
+    fig.add_vline(x=res.test_start, line=dict(color=STAR_GOLD, dash="dash"))
+    fig.add_annotation(x=res.test_start, y=1, yref="paper", text="inicio prueba final", showarrow=False, font=dict(color=STAR_GOLD))
+    fig.update_layout(title="Valor neto de costos (empieza en 1)", height=420, **LAYOUT)
+    st.plotly_chart(fig)
+    pct_cols = ["rendimiento anual (CAGR)", "volatilidad anual", "máximo drawdown", "rendimiento acumulado",
+                "rotación media por decisión", "costos totales", "cambio medio de pesos objetivo"]
+    st.dataframe(res.metrics.style.format({c: "{:.2%}" for c in pct_cols} | {"Sharpe anual": "{:.2f}"}, na_rep="—"))
+    for name, run in res.runs.items():
+        if run.failures:
+            st.warning(f"{name}: {len(run.failures)} fecha(s) sin solución del optimizador; se conservó la cartera anterior. "
+                       f"Primera: {run.failures[0]}")
+    st.caption("Reporten también las variantes que probaron y los resultados adversos: elegir solo la que mejor lució "
+               "después de verla es sobreajuste. Un backtest ganador no prueba causalidad ni que se repita.")
+    _explain("¿Qué significa el backtest walk-forward?", """
+- **Walk-forward:** se "camina" por la historia. En cada fecha de decisión se estiman μ y Σ **solo con datos pasados**
+  (la ventana), se eligen los pesos y se aplican hacia adelante. Así se simula lo que se habría sabido en ese momento.
+- **Estrategias:** *mantener cantidades* (compra 1/N y no vuelve a operar), *1/N rebalanceado*, *mínima varianza*,
+  *Markowitz con γ* y *Black-Litterman* (prior de equilibrio con referencia 1/N, sin views).
+- **Costos:** se cobran sobre lo negociado en cada rebalanceo; por eso operar mucho puede salir caro.
+- **Validación vs. prueba final:** los parámetros (ventana, frecuencia, γ) se ajustan mirando validación. La prueba final
+  es el examen: si se ajusta mirándola, deja de ser una prueba honesta.
+- **Métricas:** rendimiento anual neto, volatilidad, Sharpe, peor caída (drawdown), rotación y cuánto cambian los pesos
+  objetivo entre decisiones (estabilidad).
 """)
 
 
@@ -641,6 +956,18 @@ def _tab_capm(lab: LabData):
     c3.metric("Patrimonio (EV − deuda financiera)", f"{equity_value(dcf.enterprise_value, 0, 0, params['deuda_financiera']):,.0f}",
               help="Sin caja excedente ni activos no operativos (no vienen en los datos del caso cargados).")
     st.caption("COP millones. FCFF = EBIT·(1−t) + D&A − CAPEX − ΔNWC; TV = FCFF₆/(WACC − g) con FCFF₆ = FCFF₅·(1+g).")
+    grid = {}
+    for dg in (-0.01, -0.005, 0.0, 0.005, 0.01):
+        col = {}
+        for dw in (-0.02, -0.01, 0.0, 0.01, 0.02):
+            try:
+                col[f"WACC {w + dw:.2%}"] = discounted_cash_flow(flows, w + dw, g + dg).enterprise_value
+            except ValueError:
+                col[f"WACC {w + dw:.2%}"] = np.nan  # WACC <= g: sin valor terminal
+        grid[f"g {g + dg:.2%}"] = col
+    with st.expander("Sensibilidad del valor de la empresa (EV) a WACC y g"):
+        st.dataframe(pd.DataFrame(grid).style.format("{:,.0f}", na_rep="WACC ≤ g"))
+        st.caption("Si el EV cambia mucho con pequeños cambios de WACC o g, la conclusión depende de esos supuestos.")
     roic = st.number_input("ROIC estable para revisar la reinversión (opcional, decisión del equipo)", value=0.0, step=0.01,
                            format="%.3f", key="lab_val_roic")
     if roic > 0:
@@ -696,39 +1023,32 @@ def _tab_capm(lab: LabData):
 """)
 
 
-def _tab_export(lab: LabData, rf_ea, gamma, bounds, results):
-    asset_order = list(lab.mu.index)
-    if lab.returns is not None:
-        snapshot_bytes = lab.returns.to_csv().encode()
+def _tab_export(lab: LabData, rf_ea, gamma, bounds, groups, results):
+    text = snapshot_csv(lab.returns, lab.mu, lab.sigma)
+    trace = build_trace(
+        source=lab.source,
+        rights="Datos sintéticos/caso docente o Yahoo Finance (uso académico; no redistribuir cotizaciones).",
+        periods_per_year=lab.m, asset_order=list(lab.mu.index), snapshot_text=text,
+        parameters={"rf_EA": rf_ea, "gamma": gamma, "bounds": [list(b) for b in bounds],
+                    "groups": [[list(g_), cap] for g_, cap in (groups or [])], "frequency": lab.frequency},
+        results=results or {}, solver=results["gmv"].solver if results else None,
+        common_rows=None if lab.returns is None else len(lab.returns), rows_before_mask=lab.n_before,
+        views_ids=st.session_state.get("lab_view_ids", []), rebalance_ids=st.session_state.get("lab_rebalance_ids", []),
+    )
+    files = export_bundle(trace, text)
+    problems = verify_bundle(files)
+    if problems:
+        st.error("La exportación no es coherente: " + "; ".join(problems))
     else:
-        snapshot_bytes = json.dumps({"mu": lab.mu.tolist(), "Sigma": lab.sigma.values.tolist()}).encode()
-    trace = {
-        "schema": "bot-portafolios/trace/v2",
-        "analysis_id": str(uuid.uuid4()),
-        "snapshot_sha256": hashlib.sha256(snapshot_bytes).hexdigest(),
-        "code_commit": _git_commit(),
-        "dependencies": {"python": platform.python_version(), "pandas": pd.__version__, "numpy": np.__version__},
-        "source": lab.source,
-        "rights": "Datos sintéticos/caso docente o Yahoo Finance (uso académico; no redistribuir cotizaciones).",
-        "calculated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "frequency_periods_per_year": lab.m,
-        "return_convention": "simple (capa de cartera); logs solo en la capa individual v1",
-        "annualization": "mu*m, sigma*sqrt(m) (convención aritmética)",
-        "asset_order": asset_order,
-        "common_rows": None if lab.returns is None else len(lab.returns),
-        "rows_before_mask": lab.n_before,
-        "parameters": {"rf_EA": rf_ea, "gamma": gamma, "bounds": bounds},
-        "solver": results["gmv"].solver if results else None,
-        "results": {k: {"status": r.status, "weights": None if r.weights is None else r.weights.round(10).to_dict(),
-                        "mean_period": r.mean, "vol_period": r.volatility, "active_bounds": r.active_bounds}
-                    for k, r in (results or {}).items()},
-        "student_decision": None,
-        "status": "ejecucion_laboratorio",
-    }
+        st.success("✅ Traza verificada: el hash coincide con el snapshot exportado, con parámetros y commit.")
     st.json(trace, expanded=False)
-    st.download_button("Descargar traza (JSON)", json.dumps(trace, indent=2, ensure_ascii=False, default=str),
-                       file_name=f"traza_{trace['analysis_id'][:8]}.json", mime="application/json")
-    st.caption("La traza conecta fuente → muestra → parámetros → resultado → commit. La decisión del estudiante "
+    c1, c2 = st.columns(2)
+    c1.download_button("Descargar traza (JSON)", files["traza.json"], file_name=f"traza_{trace['analysis_id'][:8]}.json",
+                       mime="application/json")
+    c2.download_button("Descargar snapshot de datos (CSV)", files["snapshot.csv"], file_name=f"snapshot_{trace['analysis_id'][:8]}.csv",
+                       mime="text/csv")
+    st.caption("La traza conecta fuente → muestra → parámetros → resultado → commit, con los IDs de las views y de los "
+               "rebalanceos usados. Cualquiera puede recalcular el SHA-256 del CSV y compararlo. La decisión del estudiante "
                "(`student_decision`) la completa el equipo; la app no la llena.")
 
 
@@ -771,7 +1091,7 @@ solo cambia cuando la política del equipo lo indica.
         if loaded is None:
             st.warning("Primero ejecuta la sección **Comparación de activos** (arriba) para traer precios reales de Yahoo Finance.")
             return
-        prices, m, label = loaded
+        prices, m, label, frequency = loaded
         if source == SOURCE_SYNTH:
             st.warning("🧪 **MODO LABORATORIO SINTÉTICO.** Series generadas para practicar: **no son cotizaciones reales**.")
         else:
@@ -782,7 +1102,7 @@ solo cambia cuando la política del equipo lo indica.
             st.error("Elige al menos 2 activos para formar una cartera.")
             return
         try:
-            lab = _from_prices(source, prices, m, label, chosen)
+            lab = _from_prices(source, prices, m, label, chosen, frequency)
         except ValueError as exc:
             st.error(str(exc))
             return
@@ -797,19 +1117,39 @@ solo cambia cuando la política del equipo lo indica.
         lo = c3.number_input("Peso mínimo por activo", value=float(ctrl["bounds"][0][0]), step=0.05, format="%.2f", key="lab_lo",
                              help="Negativo = se permiten cortos (decisión del equipo).")
         hi = c4.number_input("Peso máximo por activo", value=float(ctrl["bounds"][0][1]), step=0.05, format="%.2f", key="lab_hi")
-    bounds = [(lo, hi)] * len(lab.mu)
+        with st.expander("Cotas por activo y topes por sector (opcional)"):
+            st.caption("Por defecto todos los activos usan el mínimo y máximo de arriba. Aquí se pueden cambiar por activo y "
+                       "agrupar activos en sectores con un peso máximo por sector (decisión del equipo).")
+            assets = list(lab.mu.index)
+            per_asset = st.data_editor(
+                pd.DataFrame({"activo": assets, "mínimo": [lo] * len(assets), "máximo": [hi] * len(assets), "sector": [""] * len(assets)}),
+                key=f"lab_bounds_{abs(hash((tuple(assets), lo, hi)))}", hide_index=True, disabled=["activo"])
+            sectors = sorted({str(x).strip() for x in per_asset["sector"] if str(x).strip() and str(x) != "nan"})
+            caps = {}
+            if sectors:
+                cap_df = st.data_editor(pd.DataFrame({"sector": sectors, "peso máximo": [1.0] * len(sectors)}),
+                                        key=f"lab_caps_{abs(hash(tuple(sectors)))}", hide_index=True, disabled=["sector"])
+                caps = dict(zip(cap_df["sector"], cap_df["peso máximo"].astype(float)))
+    bounds = [(float(r["mínimo"]), float(r["máximo"])) for _, r in per_asset.iterrows()]
+    groups = [([a for a, sec in zip(per_asset["activo"], per_asset["sector"]) if str(sec).strip() == name], cap)
+              for name, cap in caps.items() if cap < 1.0] or None
 
-    tabs = st.tabs(["Riesgo conjunto", "Markowitz y fronteras", "Black-Litterman", "Rebalanceo", "Beta, CAPM y valoración", "Exportar"])
+    tabs = st.tabs(["Riesgo conjunto", "Estrés y estimadores", "Markowitz y fronteras", "Black-Litterman", "Rebalanceo",
+                    "Backtest", "Beta, CAPM y valoración", "Exportar"])
     results = None
     with tabs[0]:
-        _tab_risk(lab)
+        w_test = _tab_risk(lab)
     with tabs[1]:
-        results = _tab_markowitz(lab, rf_ea, gamma, bounds)
+        _tab_stress(lab, w_test, bounds, groups)
     with tabs[2]:
-        _tab_black_litterman(lab, rf_ea, gamma, bounds)
+        results = _tab_markowitz(lab, rf_ea, gamma, bounds, groups)
     with tabs[3]:
-        _tab_rebalance(rf_ea)
+        _tab_black_litterman(lab, rf_ea, gamma, bounds, groups)
     with tabs[4]:
-        _tab_capm(lab)
+        _tab_rebalance(lab, gamma, bounds, groups)
     with tabs[5]:
-        _tab_export(lab, rf_ea, gamma, bounds, results)
+        _tab_backtest(lab, rf_ea, gamma, bounds, groups)
+    with tabs[6]:
+        _tab_capm(lab)
+    with tabs[7]:
+        _tab_export(lab, rf_ea, gamma, bounds, groups, results)
