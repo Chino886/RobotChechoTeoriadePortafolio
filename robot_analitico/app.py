@@ -522,24 +522,26 @@ def render_disclaimer_gate(user_name: str, user_email: str) -> None:
     if st.session_state.get("terms_accepted", False):
         return
 
-    st.subheader("Antes de continuar")
-    st.warning(DISCLAIMER_TEXT)
+    with st.container(key="dpst_gate"):
+        st.markdown('<span class="dpst-pill">PASO 2 DE 2 · CONSENTIMIENTO</span>', unsafe_allow_html=True)
+        st.subheader("Antes de continuar")
+        st.warning(DISCLAIMER_TEXT)
 
-    privacy_ok = st.checkbox(
-        "Autorizo el tratamiento de mis datos según el aviso de "
-        "privacidad del piloto académico (Ley 1581 de 2012).",
-        value=False, key="consent_privacy",
-    )
-    disclaimer_ok = st.checkbox(
-        "He leído y acepto el disclaimer académico anterior.",
-        value=False, key="consent_disclaimer",
-    )
+        privacy_ok = st.checkbox(
+            "Autorizo el tratamiento de mis datos según el aviso de "
+            "privacidad del piloto académico (Ley 1581 de 2012).",
+            value=False, key="consent_privacy",
+        )
+        disclaimer_ok = st.checkbox(
+            "He leído y acepto el disclaimer académico anterior.",
+            value=False, key="consent_disclaimer",
+        )
 
-    accept_clicked = st.button(
-        "Aceptar y continuar",
-        type="primary",
-        disabled=not (privacy_ok and disclaimer_ok),
-    )
+        accept_clicked = st.button(
+            "Aceptar y continuar",
+            type="primary",
+            disabled=not (privacy_ok and disclaimer_ok),
+        )
 
     if not accept_clicked:
         st.session_state["access_logged"] = False
@@ -2064,6 +2066,11 @@ def render_news_panel() -> None:
 # en blanco (todo lo demás está detenido con st.stop hasta que se responda).
 @st.dialog("Antes de entrar", dismissible=False)
 def render_intro_alert():
+    st.markdown(
+        f'<div class="dpst-intro-brand">{_logo_svg(40, "logoGradIntro")}'
+        f'<div><div class="b">{BRAND_NAME}</div><div class="s">{INSTITUTION}</div></div></div>',
+        unsafe_allow_html=True,
+    )
     st.write(
         "Esta app está hecha para mirar comportamientos históricos y "
         "de pronóstico de activos individuales con fines académicos. "
@@ -2081,6 +2088,11 @@ def render_intro_alert():
 
 
 def main() -> None:
+    # Estilos primero, para que la ventana de bienvenida y el disclaimer ya salgan con el diseño.
+    render_header()
+    render_sidebar_style()
+    apply_ui_fx(_command_items())
+
     if st.session_state.get("intro_cancelled", False):
         st.info("Saliste de la aplicación. Puedes cerrar esta pestaña.")
         st.stop()
@@ -2088,10 +2100,6 @@ def main() -> None:
     if not st.session_state.get("intro_ack", False):
         render_intro_alert()
         st.stop()
-
-    render_header()
-    render_sidebar_style()
-    apply_ui_fx(_command_items())
 
     if DEV_MODE:
         st.sidebar.warning("MODO DESARROLLO: login OIDC desactivado temporalmente.")

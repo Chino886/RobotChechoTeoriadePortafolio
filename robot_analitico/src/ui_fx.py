@@ -110,6 +110,61 @@ button:focus-visible, [role="tab"]:focus-visible, a:focus-visible {
     }
 }
 
+/* Ventana de bienvenida: fondo desenfocado y panel de vidrio. */
+[data-testid="stDialog"] { background: rgba(5, 8, 16, 0.62) !important; backdrop-filter: blur(10px) saturate(140%); -webkit-backdrop-filter: blur(10px) saturate(140%); }
+[data-testid="stDialog"] > div {
+    background: linear-gradient(180deg, rgba(18, 26, 43, 0.96), rgba(12, 18, 32, 0.96)) !important;
+    border: 1px solid rgba(148, 170, 210, 0.18); border-radius: 22px !important;
+    box-shadow: 0 40px 100px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    animation: dpst-pop 0.35s cubic-bezier(.2, .9, .25, 1) both;
+}
+[data-testid="stDialog"] h2 p {
+    font-family: 'Instrument Serif', Georgia, serif !important; font-weight: 400 !important; font-size: 2rem !important;
+}
+@keyframes dpst-pop { from { opacity: 0; transform: translateY(12px) scale(0.97); } to { opacity: 1; transform: none; } }
+.dpst-intro-brand { display: flex; align-items: center; gap: 12px; padding-bottom: 0.7rem; }
+.dpst-intro-brand .b { font-weight: 700; font-size: 1.15rem; letter-spacing: -0.01em; color: #E8EDF6; }
+.dpst-intro-brand .s { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.72rem; letter-spacing: 0.06em; color: #8C99B3; }
+
+/* Disclaimer: tarjeta centrada de vidrio. */
+.st-key-dpst_gate {
+    max-width: 780px; margin: 1.5rem auto 0; padding: 2rem 2.2rem;
+    border-radius: 22px; border: 1px solid rgba(148, 170, 210, 0.16);
+    background: radial-gradient(700px 260px at 100% 0%, rgba(52, 201, 160, 0.10), transparent 60%), rgba(18, 26, 43, 0.7);
+    backdrop-filter: blur(14px); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+    animation: dpst-pop 0.45s cubic-bezier(.2, .9, .25, 1) both;
+}
+.st-key-dpst_gate h3 { font-family: 'Instrument Serif', Georgia, serif !important; font-weight: 400 !important; font-size: 2.4rem !important; }
+.st-key-dpst_gate [data-testid="stCheckbox"] { width: 100%; }
+.st-key-dpst_gate [data-testid="stCheckbox"] label {
+    padding: 0.7rem 0.9rem; border-radius: 12px; border: 1px solid rgba(148, 170, 210, 0.14);
+    background: rgba(10, 15, 28, 0.5); width: 100%; transition: border-color 0.2s, background 0.2s;
+}
+.st-key-dpst_gate [data-testid="stCheckbox"] label:hover { border-color: rgba(52, 201, 160, 0.45); }
+.st-key-dpst_gate [data-testid="stCheckbox"] label:has(input:checked) { border-color: rgba(52, 201, 160, 0.55); background: rgba(52, 201, 160, 0.07); }
+@media (max-width: 640px) { .st-key-dpst_gate { padding: 1.4rem 1.1rem; margin-top: 0.5rem; } }
+
+/* Expanders principales: el abierto se resalta. */
+[data-testid="stMainBlockContainer"] [data-testid="stExpander"] summary { padding-block: 0.85rem; }
+[data-testid="stMainBlockContainer"] [data-testid="stExpander"] summary p { font-weight: 600; font-size: 1.02rem; }
+[data-testid="stExpander"] details[open] {
+    border-color: rgba(52, 201, 160, 0.32) !important;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+[data-testid="stExpander"] details[open] > summary { border-bottom: 1px solid rgba(148, 170, 210, 0.10); }
+[data-testid="stExpander"] details[open] > summary p { color: #E8EDF6; }
+[data-testid="stExpander"] summary svg { transition: transform 0.3s cubic-bezier(.2, .8, .2, 1), color 0.2s; }
+[data-testid="stExpander"] details[open] > summary svg { color: #34C9A0; }
+
+/* Barra lateral: título serif y alertas más sobrias. */
+[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { font-family: 'Instrument Serif', Georgia, serif !important; font-weight: 400 !important; font-size: 1.7rem !important; }
+
+/* Alertas en vidrio. */
+[data-testid="stAlert"] > div { backdrop-filter: blur(8px); border: 1px solid rgba(148, 170, 210, 0.10); }
+
+/* Casillas y radios con transición. */
+[data-baseweb="checkbox"] span, [data-baseweb="radio"] div { transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s; }
+
 /* El componente invisible que carga los efectos no debe ocupar espacio. */
 [data-testid="stElementContainer"]:has(> iframe[title="st.iframe"][height="0"]),
 [data-testid="stElementContainer"]:has(iframe[height="0"]) { display: none; }
