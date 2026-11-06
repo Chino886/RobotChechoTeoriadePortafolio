@@ -26,7 +26,7 @@ AYUDA = {
     "cov_corr": """Dos tablas de colores que muestran **si las empresas se mueven juntas**.
 
 - Cada cuadro cruza la empresa de la fila (izquierda) con la de la columna (abajo).
-- **Correlación cerca de 1 (dorado):** suben y bajan juntas → no ayudan a protegerse.
+- **Correlación cerca de 1 (verde):** suben y bajan juntas → no ayudan a protegerse.
 - **Cerca de 0 (oscuro):** no tienen que ver una con otra → buena mezcla.
 - **Cerca de −1 (azul):** cuando una sube la otra baja → se compensan.
 - La **covarianza** dice lo mismo pero en otra escala; la diagonal muestra qué tanto se mueve cada empresa sola.""",
@@ -55,7 +55,7 @@ AYUDA = {
     # ------------------------------------------------------------------ Markowitz
     "markowitz": """La gráfica muestra **riesgo** (eje horizontal) contra **ganancia esperada** (eje vertical).
 
-- **Línea dorada (frontera eficiente):** las mejores mezclas: no hay otra con más ganancia y el mismo riesgo.
+- **Línea verde (frontera eficiente):** las mejores mezclas: no hay otra con más ganancia y el mismo riesgo.
 - **Rombo (mínimo riesgo):** la mezcla que menos se mueve.
 - **Estrella (tangente):** la que más gana por cada unidad de riesgo.
 - **Círculo (óptimo personal):** la mejor para tu nivel de miedo al riesgo (γ).

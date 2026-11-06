@@ -4,8 +4,8 @@
 
 [theme]
 base="dark"
-primaryColor="#EBC35E"
-backgroundColor="#0E1117"
-secondaryBackgroundColor="#1A1F2B"
-textColor="#E6E6E6"
+primaryColor="#34C9A0"
+backgroundColor="#0A0F1C"
+secondaryBackgroundColor="#121A2B"
+textColor="#E8EDF6"
 font="sans serif"

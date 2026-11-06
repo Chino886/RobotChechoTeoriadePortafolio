@@ -8,17 +8,39 @@ histórico rendimiento-riesgo de la comparación de N activos (Fase 8).
 """
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.io as pio
 
-# Paleta (tema oscuro, alineada con .streamlit/config.toml): dorado suave en vez de
-# verde neón para que se lea bien al proyectar sobre fondo oscuro.
-ACCENT_GOLD = "#EBC35E"  # líneas principales
-ELECTRIC_BLUE = "#2DE1FC"  # bandas, áreas y series secundarias
-STAR_WHITE = "#F5F5F5"  # elección marcada por el usuario en el mapa; también la CAL
+# Paleta (tema azul noche + esmeralda, alineada con .streamlit/config.toml): verde
+# jade suave (no neón) para que se lea bien al proyectar sobre fondo oscuro.
+ACCENT_EMERALD = "#34C9A0"  # líneas principales
+SKY_BLUE = "#6AA8FF"  # bandas, áreas y series secundarias
+STAR_WHITE = "#F5F7FB"  # elección marcada por el usuario en el mapa; también la CAL
+# Nombres anteriores, conservados para no romper importaciones existentes.
+ACCENT_GOLD = ACCENT_EMERALD
+ELECTRIC_BLUE = SKY_BLUE
+
+_GRID = "rgba(148, 170, 210, 0.10)"
+_AXIS_FONT = dict(family="Geist Mono, ui-monospace, monospace", color="#8C99B3", size=11)
+
+# Plantilla "dpst": ejes, leyenda, tooltip y serie de colores. Va en una plantilla (y no
+# en DARK_LAYOUT) para que las llamadas que pasan su propio xaxis/yaxis no choquen.
+_template = go.layout.Template()
+_template.layout = go.Layout(
+    title_font=dict(family="Instrument Serif, Georgia, serif", size=22, color="#E8EDF6"),
+    colorway=[ACCENT_EMERALD, SKY_BLUE, "#F5B84B", "#FF7A7A", "#B794F6", "#7FD6E8", "#E8EDF6"],
+    xaxis=dict(gridcolor=_GRID, zerolinecolor=_GRID, linecolor=_GRID, tickfont=_AXIS_FONT),
+    yaxis=dict(gridcolor=_GRID, zerolinecolor=_GRID, linecolor=_GRID, tickfont=_AXIS_FONT),
+    legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#AEB9CE")),
+    hoverlabel=dict(bgcolor="#121A2B", bordercolor=ACCENT_EMERALD,
+                    font=dict(family="Geist Mono, monospace", color="#E8EDF6")),
+)
+pio.templates["dpst"] = _template
+
 DARK_LAYOUT = dict(
-    template="plotly_dark",
-    paper_bgcolor="#0E1117",
-    plot_bgcolor="#1A1F2B",
-    font=dict(family="Inter, sans-serif", color="#E6E6E6"),
+    template="plotly_dark+dpst",
+    paper_bgcolor="rgba(0,0,0,0)",  # transparente: la tarjeta del gráfico pone el fondo
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(family="Geist, Inter, sans-serif", color="#E8EDF6", size=13),
 )
 
 
@@ -83,7 +105,7 @@ def forecast_chart(prices, steps, ticker: str, frequency: str, history_window: i
     fig.add_trace(
         go.Scatter(
             x=future_dates, y=q05s, mode="lines", line=dict(width=0), fill="tonexty",
-            name="Intervalo 5%-95% (pronóstico)", fillcolor="rgba(45, 225, 252, 0.18)",
+            name="Intervalo 5%-95% (pronóstico)", fillcolor="rgba(106, 168, 255, 0.18)",
         )
     )
     fig.add_trace(
@@ -126,7 +148,7 @@ def risk_return_map(summaries, non_dominated, starred_ticker: "str | None" = Non
                 text=[s.ticker for s in dominated],
                 textposition="top center",
                 name="Dominado",
-                marker=dict(size=10, color="rgba(45, 225, 252, 0.55)"),
+                marker=dict(size=10, color="rgba(106, 168, 255, 0.55)"),
             )
         )
     if frontier:

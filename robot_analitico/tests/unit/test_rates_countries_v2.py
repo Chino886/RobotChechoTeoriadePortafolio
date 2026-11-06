@@ -111,3 +111,4 @@ def test_rates_page_lists_countries_and_shows_rate_without_typing(monkeypatch):
     box.set_value("Brasil").run()
     assert not at.exception and any("Brasil" in m.label for m in at.metric)
     assert any("FMI" in c.value for c in at.caption)
+    assert not any("Búscalo por nombre" in e.label for e in at.expander)  # solo queda la lista de países
