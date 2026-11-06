@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 
 from src.analytics import annualize_mean, annualize_vol, log_returns, max_drawdown
+from src.data_quality import align_fx_no_lookahead
 
 # La guía exige que la vista comparativa pueda aceptar simultáneamente al
 # menos 20 activos válidos (RF-19). No se usa para bloquear con menos: solo
@@ -121,8 +122,8 @@ def build_comparison(
 
     # Convierte cada activo a la moneda base. Si ya está en esa moneda, se usa
     # el precio tal cual; si no, se necesita el tipo de cambio en fx_rates
-    # alineado por fecha (forward-fill para días sin cotización de la divisa,
-    # igual que un feriado); si no hay tasa suficiente, el activo se excluye.
+    # alineado por fecha con el último dato disponible en o antes de cada fecha;
+    # si no hay tasa suficiente, el activo se excluye.
     compatible: "dict[str, pd.DataFrame]" = {}
     for ticker, asset in ok_assets.items():
         currency = (asset.currency or "N/D").upper()
@@ -152,11 +153,10 @@ def build_comparison(
             )
             continue
 
-        if fx_series.index.tz is not None:
-            fx_series = fx_series.copy()
-            fx_series.index = fx_series.index.tz_localize(None)
-
-        aligned_fx = fx_series.reindex(asset_prices.index).ffill()
+        # Último dato FX publicado en o antes de cada fecha del activo (sin look-ahead):
+        # unión de calendarios, orden y relleno hacia adelante. Reindexar primero a las
+        # fechas del activo perdía los datos FX de días que el activo no tiene.
+        aligned_fx = align_fx_no_lookahead(asset_prices.index, fx_series)
         valid = aligned_fx.notna()
         if int(valid.sum()) < 2:
             excluded.append(

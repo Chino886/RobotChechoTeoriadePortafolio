@@ -69,6 +69,21 @@ def beta_ols(asset_returns: pd.Series, market_returns: pd.Series, rf=0.0) -> Bet
     )
 
 
+def portfolio_beta(weights: pd.Series, asset_betas: pd.Series) -> float:
+    """
+    Beta de una cartera de pesos constantes = Σ w_i β_i (guía, sección 8; P102 y P104).
+    Solo es válida si todas las betas salen de la misma muestra, el mismo benchmark y la
+    misma convención de rendimientos. Si falta la beta de algún activo con peso, se
+    detiene con un error en vez de tratarla como cero.
+    """
+    w = weights.astype(float)
+    b = asset_betas.reindex(w.index).astype(float)
+    missing = [a for a in w.index[b.isna()] if abs(w[a]) > 0]
+    if missing:
+        raise ValueError(f"Falta la beta de: {', '.join(map(str, missing))}.")
+    return float((w * b.fillna(0.0)).sum())
+
+
 def unlever_beta(beta_levered: float, debt_to_equity: float, tax: float, beta_debt: float = 0.0) -> float:
     """beta_U = [beta_L + beta_D (1 - t) D/E] / [1 + (1 - t) D/E]. Con beta_D = 0 es Hamada simplificada."""
     k = (1 - tax) * debt_to_equity

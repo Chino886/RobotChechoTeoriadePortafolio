@@ -109,3 +109,54 @@ def last_bar_age(index: pd.DatetimeIndex, now: Optional[datetime] = None) -> Opt
     elif now.tzinfo and not last.tzinfo:
         last = last.tz_localize(now.tzinfo)
     return (now - last).total_seconds() / 86400
+
+
+# Par de Yahoo Finance con COP por 1 USD (guía 3.2: FX en COP por USD).
+FX_TICKER_COP_PER_USD = "USDCOP=X"
+SUPPORTED_BASES = ("USD", "COP")
+
+
+def _naive_sorted(series: pd.Series) -> pd.Series:
+    s = series.copy()
+    if isinstance(s.index, pd.DatetimeIndex) and s.index.tz is not None:
+        s.index = s.index.tz_localize(None)
+    s = s[~s.index.duplicated(keep="last")]
+    return s.sort_index()
+
+
+def align_fx_no_lookahead(target_index: pd.Index, fx: pd.Series) -> pd.Series:
+    """
+    Tipo de cambio para cada fecha de `target_index`: el último dato FX publicado en esa
+    fecha o antes (nunca uno posterior). Se unen los dos calendarios, se ordena, se
+    rellena hacia adelante y se vuelve a las fechas pedidas. Así, si el FX no cotizó un
+    día del activo pero sí un día intermedio que el activo no tiene, se usa ese dato
+    intermedio y no uno más viejo. Fechas anteriores al primer FX quedan en NaN.
+    """
+    fx = _naive_sorted(fx.dropna())
+    target = pd.DatetimeIndex(target_index)
+    if target.tz is not None:
+        target = target.tz_localize(None)
+    union = target.union(fx.index)
+    return fx.reindex(union).sort_index().ffill().reindex(target)
+
+
+def convert_prices_base(prices: pd.DataFrame, from_currency: str, to_currency: str,
+                        fx_cop_per_usd: Optional[pd.Series]) -> "tuple[pd.DataFrame, int]":
+    """
+    Pasa una tabla de precios (columnas = activos) entre USD y COP con FX en COP por USD:
+    P_COP = P_USD · FX y P_USD = P_COP / FX, con el FX alineado sin mirar al futuro. Los
+    rendimientos resultantes cumplen 1 + R_COP = (1 + R_USD)(1 + R_FX).
+    Devuelve (precios convertidos, filas descartadas por no tener FX previo).
+    """
+    src, dst = (from_currency or "").upper(), (to_currency or "").upper()
+    if src == dst:
+        return prices.copy(), 0
+    if {src, dst} != set(SUPPORTED_BASES):
+        raise ValueError(f"Conversión no soportada: {src} → {dst} (solo USD ↔ COP).")
+    if fx_cop_per_usd is None or fx_cop_per_usd.dropna().empty:
+        raise ValueError(f"Falta la serie {FX_TICKER_COP_PER_USD} para convertir {src} → {dst}.")
+    fx = align_fx_no_lookahead(prices.index, fx_cop_per_usd)
+    keep = fx.notna().to_numpy()
+    factor = fx[keep].to_numpy()[:, None]
+    out = prices[keep] * factor if dst == "COP" else prices[keep] / factor
+    return out, int((~keep).sum())

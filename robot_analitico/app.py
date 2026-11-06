@@ -40,7 +40,11 @@ from src.comparison import (
 )
 from src.data import FREQUENCY_RULES, fetch_asset_data, fetch_fx_to_usd, fetch_many, resample_prices
 from src.market import fetch_quotes
+from ayuda import AYUDA
 from src.connectivity import run_checks
+from src.tickers import fallback_tickers, fetch_us_tickers, search as search_tickers
+from src.trace import git_commit
+from src.risk_extras import expected_shortfall_fraction
 from src.rates import fetch_bond_series, list_long_term_yield_countries, ping_fred, search_bond_series
 from laboratorio_v2 import LAB_MODULES, render_portfolio_lab
 from src.ui_fx import apply_ui_fx
@@ -90,8 +94,8 @@ MEMBERS = [
     "Pedro Velez Uribe",
     "Tomás Giraldo Gomez",
 ]
-VERSION = "0.1.0"
-LAST_UPDATE = "2026-09-14"
+VERSION = "2.0.0"
+LAST_UPDATE = "2026-11-06"
 
 EXECUTION_POLICY_SUMMARY = (
     "Piloto académico restringido. Preselección (v1): posición larga únicamente, "
@@ -350,7 +354,7 @@ def _logo_svg(size: int = 44, gradient_id: str = "logoGrad") -> str:
 
 
 def render_header() -> None:
-    st.set_page_config(page_title=SYSTEM_NAME, page_icon="📊", layout="wide")
+    st.set_page_config(page_title=SYSTEM_NAME, page_icon="📊", layout="wide", initial_sidebar_state="collapsed")
     # Estilo visual (tema oscuro fintech). OJO: esta CSS apunta a atributos
     # internos de Streamlit (data-testid), que no son API oficial; si se
     # actualiza la versión de Streamlit puede requerir ajuste.
@@ -886,9 +890,14 @@ def render_forecast() -> None:
 
         st.markdown(f"**VaR paramétrico individual ({confidence_label}, RF-16)**")
         var_result = compute_var(model, p0, horizon, confidence, capital)
-        col_v1, col_v2 = st.columns(2)
+        es_fraction = expected_shortfall_fraction(model, horizon, confidence)
+        col_v1, col_v2, col_v3, col_v4 = st.columns(4)
         col_v1.metric(f"VaR fraccional ({confidence_label})", f"{var_result.var_fraction:.4%}")
         col_v2.metric("VaR en unidades monetarias", f"{var_result.var_dollar:,.2f}")
+        col_v3.metric(f"Pérdida esperada ES ({confidence_label})", f"{es_fraction:.4%}",
+                      help="Expected Shortfall: pérdida promedio en los casos en que se supera el VaR, con el mismo "
+                           "modelo y horizonte. Siempre es mayor o igual que el VaR.")
+        col_v4.metric("ES en unidades monetarias", f"{es_fraction * capital:,.2f}")
 
         st.divider()
         st.markdown(f"**Entrada, stop-loss y take-profit (p_L={params.p_l:.0%}, p_U={params.p_u:.0%}, RF-17)**")
@@ -1227,8 +1236,7 @@ def render_sovereign_rates() -> None:
             f"País ({len(countries)} con dato en FRED)", labels, index=default, key="rates_country",
             format_func=lambda x: f"{x} · datos hasta {by_label[x]['observation_end'][:4]}"
             if _is_stale(by_label[x]["observation_end"]) else x,
-            help="Países con una serie de bonos del gobierno en FRED: la de la OCDE a 10 años o, si no hay, la del FMI "
-                 "u otra serie de bonos del país. Si falta alguno, búscalo por nombre en el desplegable de abajo.",
+            help="Los países que tienen en FRED una tasa de bonos del gobierno. Escoge uno y aparece su tasa.",
         )
     with col_s:
         rates_start = st.date_input("Fecha inicial", value=pd.Timestamp("2015-01-01"), key="rates_start")
@@ -1236,8 +1244,6 @@ def render_sovereign_rates() -> None:
         rates_end = st.date_input("Fecha final", value=pd.Timestamp.today(), key="rates_end")
 
     _render_rate_series(fred_api_key, by_label[label], label, rates_start, rates_end)
-    with st.expander("¿No está el país que buscas? Búscalo por nombre en FRED"):
-        _render_rates_free_search(fred_api_key)
 
 
 def _render_rate_series(fred_api_key: str, info: dict, label: str, rates_start, rates_end) -> None:
@@ -1393,130 +1399,9 @@ def render_portfolio_forecast() -> None:
             step=0.1, key="pf_br_min",
         )
 
-    with st.expander(
-        "Más información: qué significan estos parámetros y cómo funcionan los modelos"
-    ):
-        st.markdown(
-            "#### Parámetros de entrada\n\n"
-            "**Nivel de confianza del VaR (95% o 99%)**\n"
-            "- Define qué tan \"exigente\" es la medida de pérdida máxima esperada "
-            "(VaR). Con **95%**, el VaR es la pérdida que solo se superaría en 5 "
-            "de cada 100 escenarios; con **99%**, la que solo se superaría en 1 "
-            "de cada 100.\n"
-            "- Por eso el VaR al 99% siempre sale **más alto** que al 95%: al "
-            "querer cubrir casi todos los escenarios, incluidos los más extremos "
-            "y raros, la pérdida que se toma como referencia es mayor.\n"
-            "- Usa 95% para una visión de riesgo \"normal\" y 99% si quieres ser "
-            "más prudente o te preocupan las caídas fuertes.\n\n"
-            "**Costo de compra (c_b) y costo de venta (c_s)**\n"
-            "- Representan la comisión o costo de transacción que pagas al "
-            "comprar y al vender, expresado como **fracción del precio**. Por "
-            "ejemplo, 0.001 = 0.1% y 0.005 = 0.5%.\n"
-            "- Pon **0** si no quieres considerar comisiones, o el valor real "
-            "que cobra tu bróker (si cobra 0.25% por operación, escribe 0.0025).\n"
-            "- Estos costos suben el precio que el activo debe alcanzar para que "
-            "no pierdas dinero (punto de equilibrio) y reducen el beneficio neto "
-            "de la señal.\n\n"
-            "**BR_min (beneficio/riesgo neto mínimo)**\n"
-            "- Es cuánto beneficio esperado exiges **por cada unidad de riesgo** "
-            "antes de considerar que hay una \"señal\" válida de entrada. Se "
-            "compara con el BR_neto calculado (ganancia potencial hasta el "
-            "take-profit dividida entre la pérdida potencial hasta el stop-loss, "
-            "ya descontados los costos).\n"
-            "- Ejemplos: **BR_min = 1** significa que exiges al menos empatar "
-            "beneficio con riesgo (arriesgar $1 para ganar como mínimo $1). "
-            "**BR_min = 2** significa que exiges el doble de beneficio que de "
-            "riesgo (arriesgar $1 para ganar como mínimo $2).\n"
-            "- Mientras más alto lo pongas, más estricto es el filtro y menos "
-            "señales aparecerán.\n\n"
-            "#### Cómo funcionan los modelos de pronóstico\n\n"
-            "**Caminata aleatoria (sin deriva)**\n"
-            "- Asume que el precio **no tiene una tendencia predecible**: cada "
-            "movimiento futuro es tan probable hacia arriba como hacia abajo.\n"
-            "- Solo usa qué tan **volátil** ha sido el activo históricamente para "
-            "estimar qué tan amplio es el rango de precios posibles.\n"
-            "- Es el modelo más **conservador/neutral**: no le da ventaja ni a la "
-            "subida ni a la bajada.\n\n"
-            "**Lognormal (con deriva)**\n"
-            "- Además de la volatilidad histórica, asume que la **tendencia "
-            "promedio** que ha tenido el activo en el pasado (subida o bajada "
-            "promedio) va a continuar.\n"
-            "- Es más **optimista** si el activo ha subido mucho históricamente, y "
-            "más **pesimista** si ha bajado.\n\n"
-            "Ninguno de los dos modelos garantiza el futuro: son supuestos "
-            "estadísticos simplificados, con fines académicos. Comparar ambos "
-            "ayuda a ver qué tanto depende el resultado de suponer (o no) que la "
-            "tendencia pasada se mantiene."
-        )
-
-    with st.expander("¿Qué significa cada resultado? (guía de lectura)"):
-        st.markdown(
-            "Para cada activo de la canasta se muestran dos modelos (caminata "
-            "aleatoria y lognormal con deriva). Todos los valores en dólares se "
-            "refieren al **monto que invertiste en ese activo**, proyectado al "
-            "final del plazo H.\n\n"
-            "**Valor esperado (mediana y media)**\n"
-            "- *Mediana*: el valor \"típico\" al final del plazo. Hay un 50% de "
-            "probabilidad de terminar por encima y un 50% por debajo de ese monto.\n"
-            "- *Media*: el promedio de todos los escenarios posibles. Como los "
-            "precios no pueden bajar de cero pero sí subir mucho, la media suele "
-            "quedar algo por encima de la mediana; la mediana es la referencia "
-            "más realista para un escenario normal.\n\n"
-            "**Rango 90% de confianza**\n"
-            "- Según el modelo, hay un 90% de probabilidad de que el valor final "
-            "quede entre esos dos montos: solo un 5% de los escenarios termina por "
-            "debajo del mínimo y un 5% por encima del máximo. Un rango amplio "
-            "indica un activo volátil y un pronóstico más incierto.\n\n"
-            "**Probabilidad de terminar por encima de lo invertido**\n"
-            "- Probabilidad de que al final del plazo el precio sea mayor que el "
-            "precio actual, es decir, de que la inversión valga más que hoy. No "
-            "descuenta comisiones (eso se mide más abajo con el punto de "
-            "equilibrio P_BE).\n\n"
-            "**VaR (Valor en Riesgo)**\n"
-            "- Pérdida máxima que no debería superarse en el plazo H con el nivel "
-            "de confianza elegido (95% o 99%). Por ejemplo, un VaR 95% de $100 "
-            "significa que solo en 5 de cada 100 escenarios se perdería más de "
-            "$100. Se muestra en dólares y como porcentaje del monto invertido. "
-            "No es la peor pérdida posible: es un umbral estadístico.\n\n"
-            "**Validación histórica (walk-forward)**\n"
-            "- Se \"retrocede en el tiempo\": en varios puntos del pasado se "
-            "estima el modelo solo con los datos disponibles en ese momento (sin "
-            "mirar el futuro), se pronostica H periodos hacia adelante y se "
-            "compara con lo que realmente ocurrió. Así se mide qué tan confiable "
-            "ha sido el modelo con ese activo.\n"
-            "- *RMSE*: error promedio del pronóstico del rendimiento acumulado "
-            "(logarítmico) en el plazo H. Mientras más pequeño, más cerca "
-            "estuvieron los pronósticos de la realidad.\n"
-            "- *Cobertura del intervalo 90%*: porcentaje de veces en que el valor "
-            "real cayó dentro del rango 90% pronosticado. Lo ideal es que esté "
-            "cerca de 90%; si es mucho menor, el modelo subestima el riesgo.\n"
-            "- *Acierto de dirección*: porcentaje de veces en que el modelo "
-            "acertó si el precio subiría o bajaría. Por encima de 50% aporta algo "
-            "más que el azar. En la caminata aleatoria sin deriva no se define, "
-            "porque ese modelo no predice ninguna dirección.\n"
-            "- Si la muestra no alcanza, se declara *validación insuficiente* y "
-            "el resultado debe tomarse con mucha cautela.\n\n"
-            "**Señal de entrada/salida**\n"
-            "- *Entrada (E)*: precio actual al que se compraría (posición larga).\n"
-            "- *Stop-loss (SL)*: precio de salida para cortar pérdidas; corresponde "
-            "al escenario pesimista (percentil 5%) del precio al final del plazo.\n"
-            "- *Take-profit (TP)*: precio objetivo para tomar ganancias; corresponde "
-            "al escenario optimista (percentil 95%) del precio al final del plazo.\n"
-            "- *BR_neto*: relación beneficio/riesgo **después de costos** de compra "
-            "(c_b) y venta (c_s): cuánto se podría ganar hasta el take-profit por "
-            "cada dólar que se arriesga hasta el stop-loss. Un BR_neto de 2 "
-            "significa que la ganancia potencial duplica la pérdida potencial.\n"
-            "- ✅ *Señal sustentada*: se cumplen todas las condiciones (SL < E < TP, "
-            "el punto de equilibrio con costos P_BE queda por debajo del TP, "
-            "ganancia y riesgo netos positivos, y BR_neto ≥ BR_min). ❌ Si falla "
-            "alguna, se indica el motivo y no se recomienda entrar.\n"
-            "- *Probabilidad de ganar/perder*: probabilidad de que el precio final "
-            "quede por encima o por debajo del punto de equilibrio P_BE, que ya "
-            "incluye las comisiones de compra y venta.\n\n"
-            "Son estimaciones estadísticas basadas en el historial de precios; "
-            "no garantizan resultados futuros ni constituyen una recomendación de "
-            "inversión."
-        )
+    c_help1, c_help2 = st.columns(2)
+    c_help1.caption("¿Qué significa cada opción?", help=AYUDA["canasta_parametros"])
+    c_help2.caption("¿Cómo leo los resultados?", help=AYUDA["canasta_resultados"])
 
     if st.button("Pronosticar canasta"):
         entries = []
@@ -1549,6 +1434,7 @@ def render_portfolio_forecast() -> None:
             p_l=DEFAULT_PL, p_u=DEFAULT_PU, br_min=pf_br_min, c_b=pf_c_b, c_s=pf_c_s,
         )
 
+        board_rows = []  # tablero de señales: una fila por activo y modelo
         with st.spinner(f"Descargando y pronosticando {len(entries)} activo(s)..."):
             for entry_idx, (ticker, amount) in enumerate(entries):
                 asset = fetch_asset_data(ticker, pf_start, pf_end)
@@ -1588,6 +1474,7 @@ def render_portfolio_forecast() -> None:
                     value_q95 = amount * (dist.q95_price / p0)
 
                     var_result = compute_var(model, p0, horizon, pf_confidence, amount)
+                    es_fraction = expected_shortfall_fraction(model, horizon, pf_confidence)
                     wf = walk_forward_validate(returns, fit_fn, model_label, horizon, periods_per_year)
                     signal = evaluate_signal(model, p0, horizon, risk_params)
                     probs = terminal_probabilities(model, p0, horizon, signal.p_be)
@@ -1624,6 +1511,14 @@ def render_portfolio_forecast() -> None:
                         )
                     else:
                         signal_texto = "❌ No hay señal sustentada: " + "; ".join(signal.reasons)
+                    board_rows.append({
+                        "activo": ticker, "modelo": model_label, "último dato": str(last_date.date()), "P0": p0,
+                        "entrada": signal.entry, "stop-loss": signal.sl_h, "take-profit": signal.tp_h,
+                        "equilibrio (P_BE)": signal.p_be, "BR_neto": signal.br_neto,
+                        f"VaR {pf_confidence_label}": var_result.var_fraction, f"ES {pf_confidence_label}": es_fraction,
+                        "señal": "sustentada" if signal.ok else "no hay señal",
+                        "motivo": "" if signal.ok else "; ".join(signal.reasons),
+                    })
 
                     with st.expander(f"Modelo: {model_label}{suficiencia_nota}"):
                         st.markdown(
@@ -1635,6 +1530,8 @@ def render_portfolio_forecast() -> None:
                             f"- VaR ({pf_confidence_label}): pérdida máxima esperada de "
                             f"${var_result.var_dollar:,.2f} ({var_result.var_fraction:.1%} "
                             "del monto invertido)\n"
+                            f"- Pérdida esperada (ES, {pf_confidence_label}): ${es_fraction * amount:,.2f} "
+                            f"({es_fraction:.1%}), pérdida promedio cuando se supera el VaR\n"
                             f"- Validación histórica (walk-forward): {wf_texto}\n"
                             f"- {signal_texto}\n"
                             f"- Probabilidad de ganar/perder frente al punto de equilibrio "
@@ -1650,10 +1547,26 @@ def render_portfolio_forecast() -> None:
 
                 st.divider()
 
+        if board_rows:
+            st.markdown("### Tablero de señales de la canasta")
+            board = pd.DataFrame(board_rows)
+            st.dataframe(board.style.format(
+                {c: "{:,.4f}" for c in ["P0", "entrada", "stop-loss", "take-profit", "equilibrio (P_BE)"]}
+                | {"BR_neto": "{:.2f}", f"VaR {pf_confidence_label}": "{:.2%}", f"ES {pf_confidence_label}": "{:.2%}"},
+                na_rep="—"), hide_index=True)
+            st.caption(
+                f"Construcción: para cada activo y modelo, entrada E = P0 (último cierre); stop-loss y take-profit son los "
+                f"cuantiles p_L = {DEFAULT_PL:.0%} y p_U = {DEFAULT_PU:.0%} del precio a H = {horizon} periodos; P_BE incluye "
+                f"los costos c_b = {pf_c_b} y c_s = {pf_c_s}. Hay señal solo si SL < E < TP, el beneficio y el riesgo netos "
+                f"son positivos y BR_neto ≥ {pf_br_min}. Límites: modelos homocedásticos con datos históricos; posición "
+                "larga únicamente; el bot **no ejecuta órdenes** ni recomienda operar."
+            )
+            st.download_button("Descargar tablero (CSV)", board.to_csv(index=False).encode("utf-8"),
+                               file_name="tablero_senales.csv", mime="text/csv", key="pf_board_csv")
+
 NEWS_CACHE_TTL_SECONDS = 1800  # 30 min: evita repetir llamadas externas en cada interacción
 # Alpha Vantage gratuito permite ~25 consultas/día: su caché dura más.
 ALPHA_VANTAGE_CACHE_TTL_SECONDS = 3 * 3600
-NEWS_SIDEBAR_ITEMS = 5  # las más relevantes, en el sidebar
 NEWS_PANEL_ITEMS = 15  # todas las que se muestran en la pantalla principal
 GENERAL_NEWS_QUERY = "economía mercados financieros bolsa de valores"
 GENERAL_NEWS_TOPIC = "economy_macro"  # un solo tema: varios a la vez se combinan como "Y"
@@ -1772,134 +1685,6 @@ def _get_yfinance_news(ticker: str, max_items: int = 3) -> "list[dict]":
 MILESTONE_TOP_MOVES = 3  # mayores subidas y caídas de un día que se listan
 
 
-def _news_search_link(ticker: str, date) -> str:
-    """Link a una búsqueda de noticias de Google para ese activo y esa fecha ("¿qué pasó?")."""
-    return "https://www.google.com/search?tbm=nws&q=" + requests.utils.quote(f"{ticker} {date}")
-
-
-def compute_price_milestones(
-    prices: pd.Series, ticker: str, period_label: str = "un día"
-) -> "list[tuple[str, list[str]]]":
-    """
-    Hitos históricos a partir de una serie de precios ajustados (diaria):
-    inicio del historial, máximo y mínimo históricos, peor desplome desde un
-    máximo (y si ya se recuperó), mayores subidas y caídas de un día, y
-    mejor/peor año calendario. Devuelve [(sección, [líneas markdown])].
-    """
-    prices = prices.dropna()
-    prices = prices[prices > 0]
-    if len(prices) < 2:
-        return []
-
-    def day(ts) -> str:
-        return str(pd.Timestamp(ts).date())
-
-    last_price = float(prices.iloc[-1])
-    sections = []
-
-    # Resumen: inicio, máximo y mínimo históricos.
-    first_date, first_price = prices.index[0], float(prices.iloc[0])
-    max_date, max_price = prices.idxmax(), float(prices.max())
-    min_date, min_price = prices.idxmin(), float(prices.min())
-    below_max = last_price / max_price - 1
-    summary = [
-        f"Inicio del historial: {day(first_date)} a {first_price:,.2f} "
-        f"(desde entonces: {last_price / first_price - 1:+,.0%})",
-        f"Máximo histórico: {max_price:,.2f} el {day(max_date)}"
-        + (" — hoy está en su máximo" if below_max > -0.005 else f" — hoy está {-below_max:.0%} por debajo"),
-        f"Mínimo histórico: {min_price:,.2f} el {day(min_date)}",
-    ]
-
-    # Peor desplome: mayor caída desde un máximo previo hasta un valle.
-    running_max = prices.cummax()
-    drawdown = prices / running_max - 1
-    trough_date = drawdown.idxmin()
-    worst_drawdown = float(drawdown.min())
-    if worst_drawdown < 0:
-        peak_date = prices.loc[:trough_date].idxmax()
-        peak_price = float(prices.loc[peak_date])
-        recovered = prices.loc[trough_date:][prices.loc[trough_date:] >= peak_price]
-        recovery = (
-            f"se recuperó el {day(recovered.index[0])}" if not recovered.empty else "aún no se recupera"
-        )
-        summary.append(
-            f"Peor desplome: {worst_drawdown:.0%} desde el {day(peak_date)} "
-            f"hasta el {day(trough_date)} ({recovery})"
-        )
-    sections.append(("Resumen", summary))
-
-    # Mayores movimientos de un periodo (un día con datos diarios), con link para ver qué pasó.
-    daily = prices.pct_change().dropna()
-    if not daily.empty:
-        ups = daily.nlargest(MILESTONE_TOP_MOVES)
-        downs = daily.nsmallest(MILESTONE_TOP_MOVES)
-        sections.append((
-            f"Mayores subidas en {period_label}",
-            [f"{day(d)}: {r:+.1%} — [¿qué pasó?]({_news_search_link(ticker, day(d))})"
-             for d, r in ups.items() if r > 0],
-        ))
-        sections.append((
-            f"Mayores caídas en {period_label}",
-            [f"{day(d)}: {r:+.1%} — [¿qué pasó?]({_news_search_link(ticker, day(d))})"
-             for d, r in downs.items() if r < 0],
-        ))
-
-    # Mejor y peor año calendario (cierre a cierre; el año en curso se marca).
-    yearly = prices.resample("YE").last().pct_change().dropna()
-    if not yearly.empty:
-        current_year = pd.Timestamp(prices.index[-1]).year
-
-        def year_label(ts) -> str:
-            year = pd.Timestamp(ts).year
-            return f"{year} (en curso)" if year == current_year else str(year)
-
-        best, worst = yearly.idxmax(), yearly.idxmin()
-        sections.append((
-            "Años",
-            [
-                f"Mejor año: {year_label(best)}, {yearly[best]:+.0%}",
-                f"Peor año: {year_label(worst)}, {yearly[worst]:+.0%}",
-            ],
-        ))
-
-    return [(title, lines) for title, lines in sections if lines]
-
-
-@st.cache_data(ttl=NEWS_CACHE_TTL_SECONDS, show_spinner=False)
-def _get_yfinance_milestones(ticker: str) -> "list[tuple[str, list[str]]]":
-    """
-    Hitos históricos del activo con todo su historial disponible (no solo
-    el rango elegido en la app), más los splits de acciones. Devuelve [] si
-    no se pudo descargar el historial.
-    """
-    try:
-        history = fetch_asset_data(ticker, "1970-01-01", pd.Timestamp.today() + pd.Timedelta(days=1))
-        if not history.ok or history.prices is None:
-            return []
-        sections = compute_price_milestones(history.prices["adjusted_close"], ticker)
-    except Exception:
-        return []
-
-    try:
-        splits = yf.Ticker(ticker).splits
-        split_lines = [
-            f"{str(pd.Timestamp(d).date())}: {ratio:g} por 1" for d, ratio in splits.tail(5).items()
-        ]
-        if split_lines:
-            sections.append(("Divisiones de acciones (splits)", split_lines))
-    except Exception:
-        pass
-
-    return sections
-
-
-def _render_milestones(sections: "list[tuple[str, list[str]]]") -> None:
-    for title, lines in sections:
-        st.caption(f"**{title}**")
-        for line in lines:
-            st.markdown(f"- {line}")
-
-
 def _collect_news(ticker: "str | None") -> "list[tuple[str, list[dict]]]":
     """
     Noticias por fuente: del activo si se pasa un ticker, o generales de
@@ -1919,20 +1704,6 @@ def _collect_news(ticker: "str | None") -> "list[tuple[str, list[dict]]]":
     ]
 
 
-def _render_news_block(target, source_label: str, items: "list[dict]") -> None:
-    """Muestra en `target` (st.sidebar, un expander o la página) un bloque de noticias con el rótulo de su fuente."""
-    if not items:
-        return
-    target.caption(f"**{source_label}**")
-    for item in items:
-        # Los corchetes en el título romperían el link en Markdown.
-        title = str(item.get("title", "")).replace("[", "(").replace("]", ")")
-        target.markdown(
-            f"- [{title}]({item.get('link', '')}) — *{item.get('publisher', 'N/D')}*, "
-            f"{_format_news_date(item.get('published'))}"
-        )
-
-
 LINK_CHECK_TTL_SECONDS = 6 * 3600  # un enlace verificado no se vuelve a probar en 6 horas
 LINK_CHECK_EXTRA = 3  # se prueban algunos de más por fuente, por si varios están rotos
 
@@ -1944,120 +1715,70 @@ def _verified_news(items: "tuple[tuple[str, str, str, str], ...]") -> "tuple[lis
     return verify_items(news, max_workers=16)
 
 
-def _render_top_news(target, news_by_source: "list[tuple[str, list[dict]]]", limit: int) -> bool:
-    """
-    Muestra hasta `limit` noticias por fuente, SOLO con enlaces que abren una
-    noticia (los rotos, de redirección o de consentimiento se ocultan).
-    Devuelve False si no quedó ninguna.
-    """
-    shown_any, hidden_total = False, 0
-    for source_label, items in news_by_source:
-        candidates = tuple((str(i.get("title", "")), str(i.get("link", "")), str(i.get("publisher", "")),
-                            str(i.get("published", ""))) for i in items[: limit + LINK_CHECK_EXTRA])
-        kept, hidden = _verified_news(candidates) if candidates else ([], [])
-        hidden_total += len(hidden)
-        _render_news_block(target, source_label, kept[:limit])
-        shown_any = shown_any or bool(kept)
-    if hidden_total:
-        target.caption(f"Se ocultaron {hidden_total} noticia(s) cuyo enlace no llevaba a la noticia "
-                       "(enlace roto, página de redirección o de consentimiento).")
-    return shown_any
+NEWS_HOME_ITEMS = 6  # noticias por pestaña en Inicio
+NEWS_MAX_AGE_DAYS = 7  # solo noticias de la última semana: las viejas suelen tener enlaces que ya no abren
 
 
-def render_news_sidebar() -> None:
-    """
-    Noticias e hitos en el sidebar, separados de las pestañas de análisis,
-    en dos desplegables con lo más relevante y un botón que abre todas las
-    noticias en la pantalla principal (render_news_panel). Es contenido
-    informativo: no entra en ningún cálculo del bot. Cualquier fallo se
-    captura aquí para no interrumpir el resto de la app.
-    """
+def _is_recent(raw, days: int = NEWS_MAX_AGE_DAYS) -> bool:
+    """True si la fecha de la noticia es de los últimos `days` días (o si no trae fecha legible)."""
     try:
-        result = st.session_state.get("asset_result")
-        ticker = result.ticker if result is not None and result.ok else None
-
-        st.sidebar.divider()
-        st.sidebar.subheader("Noticias e hitos")
-        st.sidebar.caption(
-            "Fuentes: Yahoo Finance, Google News y Alpha Vantage. Cada "
-            "noticia muestra su medio original y su link real; esta sección "
-            "es informativa, no hace parte del análisis cuantitativo del bot."
-        )
-
-        with st.sidebar.expander(f"Hitos históricos{f' de {ticker}' if ticker else ''}"):
-            if not ticker:
-                st.caption("Descarga un activo en \"Datos: probar un activo\" para ver sus hitos.")
-            else:
-                milestones = _get_yfinance_milestones(ticker)
-                if milestones:
-                    st.caption("Con todo el historial disponible en Yahoo Finance (precios ajustados).")
-                else:
-                    # Sin historial completo, se usa el rango ya descargado en la app.
-                    frequency = st.session_state.get("asset_frequency", "Diaria")
-                    milestones = compute_price_milestones(
-                        result.prices["adjusted_close"], ticker,
-                        period_label="un día" if frequency == "Diaria" else f"un periodo ({frequency.lower()})",
-                    )
-                    if milestones:
-                        st.caption("Con el rango de fechas descargado en la app.")
-                if milestones:
-                    _render_milestones(milestones)
-                else:
-                    st.caption("No se encontraron hitos para este activo en este momento.")
-
-        with st.sidebar.expander("Noticias más relevantes"):
-            if ticker:
-                st.markdown(f"**{ticker}**")
-                if not _render_top_news(st, _collect_news(ticker), NEWS_SIDEBAR_ITEMS):
-                    st.info("No se encontraron noticias para este activo en este momento.")
-            st.markdown("**Economía y mercados**")
-            if not _render_top_news(st, _collect_news(None), NEWS_SIDEBAR_ITEMS):
-                st.info("No se encontraron noticias generales en este momento.")
-
-        if st.sidebar.button(
-            "Ver todas las noticias económicas", key="news_open_panel", use_container_width=True
-        ):
-            st.session_state["show_news_panel"] = True
+        when = pd.to_datetime(raw, utc=True)
     except Exception:
-        st.sidebar.info("No se pudieron cargar noticias/hitos en este momento.")
+        return True
+    if pd.isna(when):
+        return True
+    return when >= pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=days)
 
 
-def render_news_panel() -> None:
-    """
-    Vista completa de noticias en la pantalla principal, abierta desde el
-    botón del sidebar. Muestra hasta NEWS_PANEL_ITEMS por fuente.
-    """
-    if not st.session_state.get("show_news_panel"):
+def _merged_recent_news(ticker: "str | None", limit: int) -> "tuple[list[dict], int]":
+    """Une las fuentes, quita repetidas y viejas, verifica enlaces y devuelve (noticias, ocultas)."""
+    seen, pool = set(), []
+    for source, items in _collect_news(ticker):
+        for item in items:
+            key = str(item.get("title", "")).strip().lower()
+            if key and key not in seen and _is_recent(item.get("published")):
+                seen.add(key)
+                pool.append({**item, "source": source})
+    candidates = tuple((str(i.get("title", "")), str(i.get("link", "")), str(i.get("publisher", "")),
+                        str(i.get("published", ""))) for i in pool[: limit + LINK_CHECK_EXTRA * 2])
+    kept, hidden = _verified_news(candidates) if candidates else ([], [])
+    return kept[:limit], len(hidden)
+
+
+def _show_news(items: "list[dict]", hidden: int, empty_text: str) -> None:
+    if not items:
+        st.info(empty_text)
         return
+    for item in items:
+        title = str(item.get("title", "")).replace("[", "(").replace("]", ")")
+        st.markdown(f"- [{title}]({item.get('link', '')})  \n  <span style='color:#8B93A7'>"
+                    f"{item.get('publisher', 'N/D')} · {_format_news_date(item.get('published'))}</span>",
+                    unsafe_allow_html=True)
+    if hidden:
+        st.caption(f"Se ocultaron {hidden} noticia(s) cuyo enlace no abría.")
+
+
+def render_news_home() -> None:
+    """Noticias de la semana en Inicio: economía en general y la empresa que se esté mirando."""
+    st.markdown("#### Noticias de la semana", help=(
+        "Noticias de los últimos 7 días, tomadas de Google News, Yahoo Finance y Alpha Vantage.\n\n"
+        "- Solo aparecen las que tienen un enlace que **sí abre**.\n"
+        "- Son para informarse: el bot **no** las usa para hacer cálculos."))
     try:
         result = st.session_state.get("asset_result")
         ticker = result.ticker if result is not None and result.ok else None
-
-        with st.container(border=True):
-            col_title, col_close = st.columns([4, 1])
-            with col_title:
-                st.subheader("Noticias económicas")
-            with col_close:
-                if st.button("Cerrar", key="news_close_panel", use_container_width=True):
-                    st.session_state["show_news_panel"] = False
-                    st.rerun()
-            st.caption(
-                "Noticias de la última semana ordenadas por relevancia según cada "
-                "fuente. Informativo: no hace parte del análisis cuantitativo del bot."
-            )
-
-            tab_labels = ["Economía y mercados"] + ([f"Noticias de {ticker}"] if ticker else [])
-            tabs = st.tabs(tab_labels)
-            for tab, tab_ticker in zip(tabs, [None, ticker]):
-                with tab:
-                    news_by_source = _collect_news(tab_ticker)
-                    if not _render_top_news(st, news_by_source, NEWS_PANEL_ITEMS):
-                        st.info("No se encontraron noticias en este momento.")
-                    if not dict(news_by_source).get("Alpha Vantage"):
-                        status = _fetch_alpha_vantage(
-                            tab_ticker, None if tab_ticker else GENERAL_NEWS_TOPIC, NEWS_PANEL_ITEMS
-                        )["status"]
-                        st.caption(f"Alpha Vantage no aportó noticias: {status}.")
+        tab_general, tab_asset = st.tabs(["Economía", f"Empresa: {ticker}" if ticker else "Empresa"])
+        with tab_general:
+            with st.spinner("Buscando noticias..."):
+                items, hidden = _merged_recent_news(None, NEWS_HOME_ITEMS)
+            _show_news(items, hidden, "No se encontraron noticias económicas en este momento.")
+        with tab_asset:
+            if not ticker:
+                st.info("Escoge una empresa en **Preselección de activos** y aquí verás sus noticias.")
+            else:
+                with st.spinner(f"Buscando noticias de {ticker}..."):
+                    items, hidden = _merged_recent_news(ticker, NEWS_HOME_ITEMS)
+                _show_news(items, hidden, f"No se encontraron noticias recientes de {ticker}.")
     except Exception:
         st.info("No se pudieron cargar las noticias en este momento.")
 
@@ -2120,17 +1841,17 @@ def main() -> None:
         user_name, user_email = getattr(user, "name", "?"), getattr(user, "email", "?")
 
     render_disclaimer_gate(user_name, user_email)
-    render_news_sidebar()
-    render_news_panel()
 
     # Menú superior. Se usan pestañas (y no páginas de st.navigation) para que
     # los datos escritos en una sección no se borren al pasar a otra.
     with st.container(key="dpst_nav"):
-        tab_home, tab_pre, tab_rates, tab_lab = st.tabs(
-            ["Inicio", "Preselección de activos", "Tasas soberanas", LAB_TITLE]
+        tab_home, tab_tickers, tab_pre, tab_rates, tab_lab = st.tabs(
+            ["Inicio", "Tickers", "Preselección de activos", "Tasas soberanas", LAB_TITLE]
         )
         with tab_home:
             render_home(user_name, user_email)
+        with tab_tickers:
+            render_tickers_page()
         with tab_pre:
             render_preselection_page()
         with tab_rates:
@@ -2143,10 +1864,62 @@ def main() -> None:
             render_portfolio_lab()
 
 
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def _ticker_directory() -> "tuple[pd.DataFrame, bool]":
+    """(directorio, True si es el completo de NASDAQ Trader; False si es la lista de respaldo)."""
+    try:
+        return fetch_us_tickers(), True
+    except Exception:
+        return fallback_tickers(), False
+
+
+def _use_ticker(ticker: str) -> None:
+    st.session_state["asset_ticker"] = ticker
+    st.session_state["ticker_chosen_msg"] = ticker
+
+
+def render_tickers_page() -> None:
+    _page_title("Tickers", "Busca el código de cualquier empresa para usarlo en el bot.")
+    st.markdown("**¿Qué es un ticker?**", help=(
+        "Es el **nombre corto** con el que una empresa aparece en la bolsa de valores.\n\n"
+        "- Apple → **AAPL**\n- Coca-Cola → **KO**\n- Ecopetrol (en Nueva York) → **EC**\n\n"
+        "El bot necesita ese código para buscar los precios de la empresa."))
+    with st.spinner("Cargando el directorio de empresas..."):
+        directory, complete = _ticker_directory()
+    if complete:
+        st.caption(f"{len(directory):,} empresas y fondos de las bolsas de Estados Unidos (directorio público de "
+                   "NASDAQ Trader, se actualiza cada día).")
+    else:
+        st.warning("No se pudo cargar el directorio completo en este momento; se muestra una lista corta de empresas "
+                   "conocidas.")
+    c1, c2 = st.columns([3, 1])
+    text = c1.text_input("Escribe el nombre de la empresa o su ticker", placeholder="Ej: coca cola, apple, tesla",
+                         key="ticker_search")
+    kind = c2.selectbox("Tipo", ["Todos", "Acción", "Fondo (ETF)"], key="ticker_kind", help=(
+        "- **Acción:** una parte de una empresa.\n- **Fondo (ETF):** una canasta de muchas acciones que se "
+        "compra como si fuera una sola."))
+    found = search_tickers(directory, text, kind)
+    st.dataframe(found.head(300), hide_index=True, height=320,
+                 column_config={"ticker": "Ticker", "empresa": "Empresa", "bolsa": "Bolsa", "tipo": "Tipo"})
+    st.caption(f"{len(found):,} resultado(s)" + (" · se muestran los primeros 300" if len(found) > 300 else ""))
+    if not found.empty:
+        options = found.head(300)
+        labels = [f"{t} — {e}" for t, e in zip(options["ticker"], options["empresa"])]
+        pick = st.selectbox("Escoge una empresa", labels, key="ticker_pick")
+        ticker = options["ticker"].iloc[labels.index(pick)]
+        st.button(f"Usar {ticker} en Preselección de activos", type="primary", on_click=_use_ticker, args=(ticker,),
+                  key="ticker_use")
+    chosen = st.session_state.pop("ticker_chosen_msg", None)
+    if chosen:
+        st.success(f"Listo: **{chosen}** quedó escrito en **Preselección de activos** → Datos del activo. Ve a esa "
+                   "pestaña y pulsa «Descargar y limpiar».")
+
+
 def _command_items() -> "list[dict]":
     """Entradas del buscador Ctrl/⌘ + K: secciones del menú superior y módulos del laboratorio."""
     sections = [
-        ("Inicio", "Portada, alcance y conexiones"),
+        ("Inicio", "Guía de uso, noticias de la semana"),
+        ("Tickers", "Buscar el código de una empresa"),
         ("Preselección de activos", "Un activo, pronóstico y comparación"),
         ("Tasas soberanas", "Bonos del gobierno por país (FRED)"),
         (LAB_TITLE, "Carteras simuladas del avance 2"),
@@ -2164,13 +1937,16 @@ def _page_title(title: str, subtitle: str) -> None:
     )
 
 
-HOME_SECTIONS = [
-    ("Un activo", "Preselección de activos",
-     "Descarga un activo, mira su historia y su pronóstico, y compara varios para preseleccionar los que no están dominados."),
-    ("Macro · FRED", "Tasas soberanas", "Tasas de bonos del gobierno por país (FRED: OCDE a 10 años y FMI) como referencia del contexto macro."),
-    ("Carteras · avance 2", LAB_TITLE,
-     "Arma carteras simuladas: Markowitz, Black-Litterman, rebalanceo, backtest, beta/CAPM y valoración."),
-    ("Barra lateral", "Noticias e hitos", "En la barra lateral: noticias verificadas y movimientos históricos del activo."),
+HOME_STEPS = [
+    ("1", "Busca la empresa", "En **Tickers** escribe el nombre de la empresa (por ejemplo, Coca-Cola) y copia su código."),
+    ("2", "Mírala por dentro", "En **Preselección de activos** pon el código, pulsa «Descargar y limpiar» y abre "
+     "«Análisis histórico» para ver cómo le ha ido."),
+    ("3", "Mira qué podría pasar", "En **Pronóstico** el bot muestra un rango de precios posibles y cuánto podrías perder "
+     "en un mal escenario."),
+    ("4", "Compara varias", "En **Comparación** pones varias empresas y el bot te dice cuáles tienen mejor relación entre "
+     "lo que ganan y lo que arriesgan."),
+    ("5", "Arma una cartera", "En **Laboratorio de portafolios** el bot reparte el dinero entre varias empresas para "
+     "arriesgar menos."),
 ]
 
 # Cinta de la portada: los modelos que trae el bot (texto informativo, no son cotizaciones).
@@ -2202,6 +1978,12 @@ def _hero_spark_svg() -> str:
     )
 
 
+def _md_bold(text: str) -> str:
+    """**texto** → <b>texto</b> para las tarjetas en HTML."""
+    import re
+    return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+
+
 def render_home(user_name: str, user_email: str) -> None:
     """Portada: nombre del bot, alcance (solo preselección académica) y mapa de secciones."""
     tape = "".join(f"<span>{item}</span>" for item in HERO_TAPE * 2)
@@ -2218,20 +2000,24 @@ def render_home(user_name: str, user_email: str) -> None:
         unsafe_allow_html=True,
     )
     st.markdown(
-        '<div class="dpst-notice"><b>Este bot no selecciona activos para invertir en la vida real.</b> '
-        "Es una herramienta de <b>preselección</b> con fines académicos: ayuda a estudiar activos y carteras "
-        "con datos históricos y modelos del curso, pero no es asesoría financiera ni recomendación de inversión, "
-        "no ejecuta operaciones y no garantiza resultados.</div>",
+        '<div class="dpst-notice"><b>Este bot no te dice en qué invertir.</b> '
+        "Te ayuda a <b>mirar y comparar</b> empresas con datos del pasado, como ejercicio de una clase de la "
+        "universidad. No es una recomendación, no compra ni vende nada y no garantiza ganancias.</div>",
         unsafe_allow_html=True,
     )
-    st.markdown("#### Qué encuentras en cada sección")
-    cols = st.columns(len(HOME_SECTIONS))
-    for i, (col, (tag, title, desc)) in enumerate(zip(cols, HOME_SECTIONS)):
+    st.markdown("#### Cómo usar el bot", help=(
+        "Sigue los pasos en orden. Cada vez que veas un **?** junto a un título o una casilla, pon el mouse encima: "
+        "aparece una explicación corta."))
+    cols = st.columns(len(HOME_STEPS))
+    for i, (col, (num, title, desc)) in enumerate(zip(cols, HOME_STEPS)):
         col.markdown(
-            f'<div class="dpst-card" style="animation-delay:{0.08 * i:.2f}s"><div class="n">{tag}</div><div class="t">{title}</div>'
-            f'<div class="d">{desc}</div></div>',
+            f'<div class="dpst-card" style="animation-delay:{0.08 * i:.2f}s"><div class="n">Paso {num}</div>'
+            f'<div class="t">{title}</div><div class="d">{_md_bold(desc)}</div></div>',
             unsafe_allow_html=True,
         )
+    st.caption("Las **Tasas soberanas** muestran cuánto paga el gobierno de cada país por prestarle dinero: sirven "
+               "de punto de comparación.")
+    render_news_home()
     with st.expander("Disclaimer académico completo"):
         st.write(DISCLAIMER_TEXT)
     with st.expander("Equipo y política de uso"):
@@ -2240,8 +2026,10 @@ def render_home(user_name: str, user_email: str) -> None:
         st.info(EXECUTION_POLICY_SUMMARY)
     with st.expander("Comprobar conexiones reales (evidencia de la prueba P2-3)"):
         render_connection_check()
+    commit = git_commit()
     st.caption(
-        f"Sesión iniciada como {user_name} ({user_email}) · última actualización {LAST_UPDATE}"
+        f"Versión {VERSION} · commit `{commit[:7] if commit and commit != 'no disponible' else 'N/D'}` · "
+        f"última actualización {LAST_UPDATE} · sesión iniciada como {user_name} ({user_email})"
     )
     if not DEV_MODE and st.button("Cerrar sesión"):
         st.logout()
@@ -2320,7 +2108,11 @@ def render_asset_data() -> None:
     st.caption("Requisitos RF-05 a RF-07")
     col1, col2, col3, col4 = st.columns([1, 1, 1, 1.4])
     with col1:
-        ticker_input = st.text_input("Ticker", value="AAPL")
+        st.session_state.setdefault("asset_ticker", "AAPL")
+        ticker_input = st.text_input(
+            "Ticker", key="asset_ticker",
+            help="El código corto de la empresa en la bolsa. Ejemplo: Apple = **AAPL**, Coca-Cola = **KO**. "
+                 "Si no lo sabes, búscalo en la pestaña **Tickers**.")
     with col2:
         start_date = st.date_input("Fecha inicial", value=pd.Timestamp("2023-01-01"))
     with col3:

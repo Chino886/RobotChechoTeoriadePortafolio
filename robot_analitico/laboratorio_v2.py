@@ -25,6 +25,7 @@ from src.capm import (
     cost_of_equity,
     discounted_cash_flow,
     nominal_rate_to_other_currency,
+    portfolio_beta,
     relever_beta,
     sml_required_return,
     unlever_beta,
@@ -33,8 +34,18 @@ from src.capm import (
 from src.backtest import ALL_STRATEGIES, ESTIMATORS, BacktestConfig, select_by_validation, walk_forward
 from src.charts import DARK_LAYOUT, ELECTRIC_BLUE, ACCENT_GOLD, STAR_WHITE
 from src.data import fetch_asset_data, resample_prices
-from src.data_quality import calendar_report, gap_safe_simple_returns, last_bar_age
+from src.data_quality import (
+    FX_TICKER_COP_PER_USD,
+    SUPPORTED_BASES,
+    calendar_report,
+    convert_prices_base,
+    gap_safe_simple_returns,
+    last_bar_age,
+)
+from ayuda import AYUDA
 from src.estimators import ewma_covariance, ledoit_wolf
+from src.factsheet import NOT_APPLICABLE, build_factsheet, to_markdown
+from src.performance import capm_required_return, historical_erp, performance_table
 from src.market import fetch_quotes, format_age
 from src.portfolio import (
     correlation_matrix,
@@ -62,9 +73,11 @@ from src.rebalance import ACTION_REBALANCE, Book, RebalancePolicy, plan_rebalanc
 from src.stress import (
     concentration,
     correlation_breakdown,
+    historical_es,
     historical_var,
     individual_shocks,
     joint_worst_historical,
+    parametric_es,
     parametric_var,
     reverse_stress,
     worst_historical_portfolio_period,
@@ -77,6 +90,10 @@ PAQUETE_DATA = Path(__file__).parent / "paquete_v2" / "data"
 SOURCE_TWO = "Caso docente de dos activos (control)"
 SOURCE_SYNTH = "Laboratorio sintético: 20 series del paquete"
 SOURCE_MARKET = "Mercado: activos de la Comparación (Yahoo Finance)"
+# Identidad para la ficha técnica (la misma de app.py).
+BRAND = "DPST"
+TEAM = "Equipo DPST"
+INSTITUTION = "Tech Business School – Universidad EIA"
 
 LAYOUT = dict(margin=dict(t=50, b=40, l=40, r=20), **DARK_LAYOUT)
 
@@ -93,7 +110,7 @@ class LabData:
     """mu y Sigma en la frecuencia nativa, más la muestra de retornos si existe."""
 
     def __init__(self, source, mu, sigma, periods_per_year, returns=None, n_before=None, label="",
-                 frequency=None, calendar=None, gap_removed=0, last_date=None):
+                 frequency=None, calendar=None, gap_removed=0, last_date=None, currency=None, fx_note=None):
         self.source = source
         self.mu = mu
         self.sigma = sigma
@@ -105,6 +122,8 @@ class LabData:
         self.calendar = calendar
         self.gap_removed = gap_removed
         self.last_date = last_date
+        self.currency = currency  # moneda base de los precios (None = sin moneda: caso docente o sintético)
+        self.fx_note = fx_note  # cómo se convirtió a la moneda base, si hubo conversión
 
 
 def _load_lab_data(source: str):
@@ -124,6 +143,37 @@ def _load_lab_data(source: str):
         f"Precios de cierre ajustado (auto_adjust=True: incluye dividendos y splits) de la sección Comparación: "
         f"frecuencia {result.frequency}, moneda {result.base_currency}, {result.common_start.date()} a {result.common_end.date()}."
     ), result.frequency
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fx_cop_per_usd(start, end) -> pd.Series:
+    """COP por 1 USD (USDCOP=X, Yahoo Finance) entre esas fechas; vacía si no hay dato."""
+    data = fetch_asset_data(FX_TICKER_COP_PER_USD, start, end)
+    if not data.ok or data.prices is None:
+        return pd.Series(dtype=float)
+    fx = data.prices["adjusted_close"].copy()
+    if fx.index.tz is not None:
+        fx.index = fx.index.tz_localize(None)
+    return fx
+
+
+def _to_base_currency(prices: pd.DataFrame, from_ccy: str, base: str) -> "tuple[pd.DataFrame, str]":
+    """Pasa los precios de la Comparación a la moneda base elegida; devuelve (precios, nota para pantalla y traza)."""
+    if from_ccy == base:
+        return prices, f"Precios en {base} tal como vienen de la Comparación (sin conversión)."
+    if from_ccy not in SUPPORTED_BASES:
+        raise ValueError(f"La Comparación está en {from_ccy}; solo se convierte entre USD y COP.")
+    start = prices.index.min() - pd.Timedelta(days=10)  # margen para tener un FX previo al primer precio
+    fx = _fx_cop_per_usd(start, prices.index.max() + pd.Timedelta(days=1))
+    if fx.empty:
+        raise ValueError(f"No se pudo descargar {FX_TICKER_COP_PER_USD} de Yahoo Finance para convertir a {base}.")
+    out, dropped = convert_prices_base(prices, from_ccy, base, fx)
+    op = "P_COP = P_USD · FX" if base == "COP" else "P_USD = P_COP / FX"
+    note = (f"Convertido {from_ccy} → {base} con {FX_TICKER_COP_PER_USD} (COP por USD): {op}, con el último FX "
+            f"publicado en o antes de cada fecha; así 1 + R_COP = (1 + R_USD)(1 + R_FX).")
+    if dropped:
+        note += f" Se descartaron {dropped} fecha(s) sin FX previo."
+    return out, note
 
 
 def _from_prices(source, prices, m, label, assets, frequency):
@@ -150,41 +200,20 @@ def _pct(x, digits=2):
 
 
 def _explain(title: str, body: str):
-    with st.expander(title):
-        st.markdown(body)
-
-
-INDICATORS_HELP = """
-- **Rendimiento esperado (anual):** promedio de los rendimientos simples × periodos por año. Es una expectativa
-  histórica, no una promesa.
-- **Volatilidad (anual):** desviación estándar × √(periodos por año). Mide cuánto se mueve el valor; no distingue
-  subidas de bajadas.
-- **Sharpe:** (rendimiento − tasa libre de riesgo) / volatilidad. Rendimiento extra por unidad de riesgo; más alto es
-  mejor, pero depende de la ventana y de la rf usada.
-- **Máximo drawdown:** la peor caída desde un máximo previo hasta un mínimo posterior (−20 % = en algún momento se
-  perdió una quinta parte desde el pico).
-- **VaR 95 % / 99 %:** pérdida que no se supera con esa confianza en un periodo. El paramétrico supone normalidad; el
-  histórico usa las pérdidas observadas. No dice cuánto se pierde en el peor 5 %.
-- **HHI y N efectivo:** HHI = Σw² mide concentración; N efectivo = 1/HHI dice a cuántos activos "iguales" equivale la
-  cartera (10 activos con N efectivo 2 = en la práctica se depende de 2).
-- **Contribución al riesgo:** cuánto de la volatilidad total aporta cada activo; suman la volatilidad de la cartera.
-- **Condicionamiento de Σ:** qué tan "frágil" es la matriz. Números muy grandes indican activos casi redundantes: los
-  pesos óptimos se vuelven inestables.
-- **Rotación (turnover):** ½·Σ|Δw|, fracción de la cartera que se compra/vende en una decisión.
-- **CAGR:** rendimiento anual compuesto que lleva del valor inicial al final.
-"""
+    """Línea corta con un signo de interrogación: la explicación aparece al poner el mouse encima."""
+    st.caption(title, help=body)
 
 
 # Pestañas del laboratorio como botones en cuadrícula con borde verde. Apunta a clases
 # internas de Streamlit (st-key-*, data-testid) y puede requerir ajuste si cambia la versión.
 # Módulos del laboratorio (pestañas). También alimentan el buscador Ctrl/⌘ + K de app.py.
 LAB_MODULES = ["Riesgo conjunto", "Estrés y estimadores", "Markowitz y fronteras", "Black-Litterman",
-               "Rebalanceo", "Backtest", "Beta, CAPM y valoración", "Exportar"]
+               "Rebalanceo", "Backtest", "Beta, CAPM y valoración", "Ficha técnica", "Exportar"]
 
 LAB_NAV_CSS = """
 <style>
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] {
-    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.7rem;
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.7rem;
     border: none; box-shadow: none; margin-bottom: 1rem; overflow: visible;
 }
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"] {
@@ -216,51 +245,18 @@ LAB_NAV_CSS = """
 
 
 def _cov_corr_help(cov: pd.DataFrame, corr: pd.DataFrame) -> str:
-    """Explicación de los dos mapas de color, con un ejemplo tomado de los dos primeros activos en pantalla."""
+    """Explicación sencilla de las tablas de colores, con un ejemplo de los dos primeros activos en pantalla."""
     a, b = cov.index[0], cov.index[1]
-    va, vb, cab = float(cov.loc[a, a]), float(cov.loc[b, b]), float(cov.loc[a, b])
-    sa, sb = va ** 0.5, vb ** 0.5
     rho = float(corr.loc[a, b])
     if rho > 0.7:
-        reading = "se mueven muy parecido: combinarlos reduce poco el riesgo"
+        reading = "se mueven casi igual, así que juntarlas protege poco"
     elif rho > 0.3:
-        reading = "tienden a moverse juntos, pero no siempre: combinarlos reduce algo el riesgo"
+        reading = "suelen moverse juntas, pero no siempre: juntarlas protege algo"
     elif rho > -0.3:
-        reading = "casi no tienen relación lineal: combinarlos reduce bastante el riesgo"
+        reading = "casi no tienen que ver una con otra: juntarlas protege bastante"
     else:
-        reading = "tienden a moverse en sentido contrario: uno compensa al otro y el riesgo baja mucho"
-    return f"""
-**Cómo se leen los cuadros.** Las dos gráficas son **tablas**: cada cuadro cruza el activo de su **fila** (nombre a la
-izquierda) con el activo de su **columna** (nombre abajo).
-- **Moverse a la derecha** = cambiar el activo de la columna; **moverse hacia abajo** = cambiar el activo de la fila.
-- **La diagonal** (de arriba-izquierda a abajo-derecha) cruza cada activo **consigo mismo**.
-- **Fuera de la diagonal** está cada **pareja** de activos. La tabla es un espejo: {a} con {b} vale lo mismo que {b}
-  con {a}.
-- **La barra de color** de la derecha es la escala: **arriba = valores altos** (más verde), **abajo = valores bajos**
-  (oscuro y, en la correlación, azul si es negativo).
-
-**Covarianza (gráfica izquierda)** — mide si dos activos se mueven **en la misma dirección** y con qué fuerza.
-- En la diagonal está la **varianza** de cada activo (su riesgo propio). Su raíz es la volatilidad.
-- Fuera de la diagonal: **positiva** = suelen subir y bajar juntos; **negativa** = cuando uno sube el otro suele bajar;
-  **cerca de 0** = no hay relación clara.
-- Está en "decimal²" y depende de qué tan volátil es cada activo, por eso **no sirve para comparar parejas** entre sí:
-  para eso está la correlación.
-
-**Correlación (gráfica derecha)** — es la covarianza "normalizada": covarianza / (volatilidad 1 × volatilidad 2).
-Siempre está entre **−1 y +1**.
-- **+1 (verde):** se mueven exactamente igual → no hay diversificación.
-- **0 (oscuro):** no hay relación lineal → buena diversificación.
-- **−1 (azul):** se mueven exactamente al revés → uno compensa al otro.
-- La diagonal siempre vale 1 (un activo se mueve igual que sí mismo).
-
-**Ejemplo con los datos en pantalla ({a} y {b}):**
-- Varianza de {a} = {va:.4f} → volatilidad √{va:.4f} = **{sa:.1%}** al año.
-- Varianza de {b} = {vb:.4f} → volatilidad √{vb:.4f} = **{sb:.1%}** al año.
-- Covarianza {a}–{b} = {cab:.4f} → correlación = {cab:.4f} / ({sa:.4f} × {sb:.4f}) = **{rho:.2f}**: {reading}.
-
-**¿Para qué sirve?** Markowitz usa esta matriz para armar carteras: entre **menos correlacionados** estén los activos,
-más baja el riesgo de la cartera al combinarlos, sin sacrificar rendimiento esperado.
-"""
+        reading = "cuando una sube la otra suele bajar: se compensan"
+    return f"{AYUDA['cov_corr']}\n\n**En estos datos:** {a} y {b} tienen correlación {rho:.2f}, o sea que {reading}."
 
 
 def _heatmap(matrix: pd.DataFrame, title: str, zmid=None, fmt=".2f"):
@@ -398,7 +394,7 @@ def _tab_risk(lab: LabData):
     c1, c2 = st.columns(2)
     c1.plotly_chart(_heatmap(lab.sigma * m, "Covarianza anualizada (decimal²)", fmt=".4f"))
     c2.plotly_chart(_heatmap(corr, "Correlación (sin unidad)", zmid=0))
-    _explain("¿Cómo leo la covarianza y la correlación?", _cov_corr_help(lab.sigma * m, corr))
+    _explain("¿Cómo leo estas tablas de colores?", _cov_corr_help(lab.sigma * m, corr))
 
     st.markdown("**Prueba una cartera** (los pesos los eliges tú; deben sumar 1):")
     w = _weights_editor(list(lab.mu.index), "lab_risk_weights")
@@ -420,7 +416,7 @@ def _tab_risk(lab: LabData):
         fig.update_layout(title="Contribución de cada activo al riesgo (% de la volatilidad)", yaxis_tickformat=".0%", height=320, **LAYOUT)
         st.plotly_chart(fig)
 
-    _explain("¿Qué significa cada indicador?", INDICATORS_HELP)
+    _explain("¿Qué significa cada número?", AYUDA["indicadores"])
     conc = concentration(w)
     a, b, c, d = st.columns(4)
     a.metric("Concentración (HHI)", f"{conc.hhi:.3f}", help="Σw². 1/N = lo más diversificado posible; 1 = un solo activo.")
@@ -433,6 +429,10 @@ def _tab_risk(lab: LabData):
         st.caption(f"VaR histórico 95 % / 99 % (1 periodo): {_pct(historical_var(rp_hist, 0.95))} / "
                    f"{_pct(historical_var(rp_hist, 0.99))} · VaR paramétrico 99 %: "
                    f"{_pct(parametric_var(stats.mean, stats.volatility, 0.99))}.")
+        st.caption(f"Pérdida esperada (ES, promedio de las pérdidas peores que el VaR) 95 %: histórica "
+                   f"{_pct(historical_es(rp_hist, 0.95))}, paramétrica {_pct(parametric_es(stats.mean, stats.volatility, 0.95))} · "
+                   f"99 %: histórica {_pct(historical_es(rp_hist, 0.99))}, paramétrica "
+                   f"{_pct(parametric_es(stats.mean, stats.volatility, 0.99))}.")
 
     if lab.returns is not None and len(lab.returns) > 30:
         window = st.slider("Ventana móvil (observaciones)", 10, min(250, len(lab.returns) - 1), min(60, len(lab.returns) // 3),
@@ -463,25 +463,7 @@ def _tab_risk(lab: LabData):
         st.plotly_chart(fig)
         st.caption("Pesos constantes: equivale a rebalancear a esos pesos cada periodo, sin costos (mantener cantidades es otra contabilidad).")
 
-    _explain("¿Qué significan la covarianza, la correlación y el riesgo de cartera?", """
-- **Varianza / volatilidad:** cuánto se mueve el rendimiento de un activo alrededor de su promedio.
-- **Covarianza (Σ):** si dos activos tienden a moverse juntos (positiva) o en sentido contrario (negativa). Se calcula
-  con una muestra común de fechas: Σ = (R − μ)'(R − μ)/(T − 1).
-- **Correlación:** la covarianza "normalizada" entre −1 y 1. Si un activo no se mueve (varianza 0), su correlación
-  **no existe** (sale vacía, no se fuerza un número).
-- **Riesgo de la cartera:** σ_p = √(w'Σw). Depende de las correlaciones, por eso es **menor** que el promedio
-  ponderado de volatilidades cuando los activos no se mueven idénticos: eso es la diversificación.
-- **Contribución al riesgo:** cuánto aporta cada activo a σ_p; suman exactamente σ_p. Una contribución negativa
-  significa que ese activo cubre a los demás.
-- **Matriz PSD / singular:** una covarianza válida es "semidefinida positiva". Si es singular (por ejemplo, dos
-  activos idénticos) no tiene inversa y algunos cálculos analíticos no aplican; se informa, no se repara en silencio.
-- **Retornos simples vs. logarítmicos:** para la cartera se usan retornos simples, porque R_p = Σ w_i R_i. Con +10 % y
-  −10 % a partes iguales la cartera rinde 0 %, pero el promedio de los logaritmos da negativo: no son lo mismo.
-- **Concentración (HHI y N efectivo):** si casi todo el peso está en pocos activos, la cartera depende de ellos aunque
-  haya muchos en la lista. N efectivo = 1/Σw².
-- **VaR:** pérdida que no se supera con cierta confianza en un periodo. El paramétrico supone normalidad; el histórico
-  usa las pérdidas que de verdad ocurrieron en la muestra.
-""")
+    _explain("¿Qué es el riesgo de una cartera?", AYUDA["riesgo_cartera"])
     return w
 
 
@@ -561,17 +543,7 @@ def _tab_stress(lab: LabData, w, bounds, groups):
         st.caption("La estabilidad de cada estimador en el tiempo (rotación) se compara en la pestaña «Backtest». "
                    "λ debe elegirse sin mirar el tramo de prueba final.")
 
-    _explain("¿Qué significan el estrés, el escenario inverso y los estimadores?", """
-- **Shock individual:** ¿cuánto pierde la cartera si **un** activo cae fuerte y los demás no se mueven?
-- **Conjunto adverso:** todos los activos en su peor momento histórico **a la vez**. Es pesimista a propósito.
-- **Ruptura de correlaciones:** en las crisis las correlaciones suben y la diversificación desaparece. Se conservan las
-  volatilidades y se fuerzan las correlaciones a un valor alto para ver cuánto sube el riesgo.
-- **Escenario inverso:** en vez de preguntar "¿qué pasa si…?", pregunta **"¿qué tendría que pasar para romper el
-  mandato?"**. Busca la combinación de movimientos más probable que produce esa pérdida.
-- **Ledoit-Wolf (shrinkage):** "encoge" la covarianza muestral hacia una más simple; reduce el ruido cuando hay muchos
-  activos para pocas observaciones y suele dar pesos más estables.
-- **EWMA:** da más peso a lo reciente (λ cerca de 1 = memoria larga). Reacciona más rápido a cambios de régimen.
-""")
+    _explain("¿Qué es una prueba de estrés?", AYUDA["estres"])
 
 
 @st.cache_data(show_spinner=False, max_entries=20)
@@ -665,29 +637,7 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None
             "muestra el óptimo personal resuelto directamente dentro de las cotas."
         )
 
-    _explain("¿Qué significa cada cartera y cada línea?", """
-- **Frontera eficiente (verde):** para cada rendimiento objetivo, la cartera de **menor riesgo posible** dentro de las
-  reglas de pesos. Se calcula resolviendo una optimización por cada punto, no con la nube de puntos.
-- **Frontera no eficiente (azul punteada):** la parte de abajo de la curva: mismo riesgo pero **menos** rendimiento.
-  Nadie racional elegiría esas carteras; se muestra para entender la forma completa.
-- **Nube gris:** carteras al azar que cumplen las reglas. Sirve para ver el "espacio posible", pero no prueba dónde
-  está la frontera.
-- **Mínima varianza global (rombo):** la cartera de menor riesgo de todas. Solo depende de Σ y de las cotas, **no** de
-  los rendimientos esperados.
-- **Tangente (estrella):** la de mayor **Sharpe** (rendimiento extra sobre la tasa libre de riesgo por unidad de riesgo).
-  Es la que toca la línea que sale de rf. No es automáticamente la mejor para ti.
-- **Óptimo personal (círculo):** la que maximiza tu utilidad U = w'μ − (γ/2)·w'Σw. **γ (aversión al riesgo) la decide el
-  equipo**: γ alto castiga más el riesgo y lleva hacia la mínima varianza; γ bajo, hacia el máximo rendimiento.
-- **Máximo rendimiento esperado (triángulo):** el mayor w'μ posible; suele concentrarse en un solo activo. Sin límites a
-  los pesos sería **no acotado** (apalancamiento infinito).
-- **CAL (línea blanca punteada):** combinaciones entre el activo libre de riesgo y la tangente. Su pendiente es el Sharpe.
-- **Estados:** "inviable" = las reglas no se pueden cumplir; "no acotado" = sin límite; "premio no positivo" = ninguna
-  cartera supera rf. Son situaciones distintas y se muestran tal cual.
-- **CML y SML:** la CML supone un portafolio de **mercado** eficiente (equilibrio). Con un universo limitado no
-  tenemos ese mercado, así que se muestra la CAL y, aparte y opcional, una **CML aproximada** que usa como proxy la
-  cartera 1/N del universo (el equipo debe justificar o cambiar ese proxy). La SML usa **beta** en el eje horizontal y
-  está en la pestaña de CAPM.
-""")
+    _explain("¿Cómo leo esta gráfica?", AYUDA["markowitz"])
     return {"gmv": gmv, "tangent": tangent, "personal": personal, "top": top}
 
 
@@ -733,21 +683,7 @@ def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds, group
                             value=float(ctrl["delta"]), step=0.5, key="lab_bl_delta")
     tau = c2.number_input("τ (incertidumbre del prior)", min_value=0.001, value=float(ctrl["tau"]), step=0.01, format="%.3f", key="lab_bl_tau")
     c3.metric("rf del periodo", f"{rf:.6f}")
-    _explain("¿Qué significan δ, τ, w_ref, Q, Ω y la confianza? ¿Qué pongo?", """
-- **δ (delta):** aversión al riesgo **implícita del mercado de referencia**. Con ella se calcula el prior π = δ·Σ·w_ref.
-  Se suele calibrar como (rendimiento esperado del mercado − rf) / varianza del mercado; valores típicos entre 2 y 4.
-  No es la γ del inversionista.
-- **τ (tau):** cuánta incertidumbre hay sobre el prior. Valores habituales entre 0,01 y 0,10; más alto = las views pesan más.
-- **w_ref:** la cartera "de equilibrio" de referencia: pesos por capitalización de mercado o una referencia estratégica
-  documentada. Un universo pequeño no es "el mercado": justifiquen la elección.
-- **Q:** la magnitud de la opinión, en decimal y en la **misma frecuencia** de los datos (0,01 = 1 %). Si la escriben como
-  rendimiento **total**, márquenlo "total" y la app resta rf.
-- **Ω (omega):** varianza de la opinión. Pequeña = mucha seguridad; grande = la view casi no cuenta. Si no la conocen,
-  usen **confianza** entre 0 y 1 y la app calcula Ω de forma proporcional. Confianza 0 excluye la view.
-- **Conocida desde / vence:** desde cuándo existía la información y hasta cuándo rige. Antes de "conocida desde" no se usa
-  (sin mirar el futuro) y después de "vence" se retira.
-- **Fuente, publicada, autor, evidencia contraria:** el registro que pide la guía para cada view; la app avisa si falta.
-""")
+    _explain("¿Qué pongo aquí?", AYUDA["bl_parametros"])
 
     st.markdown("**Cartera de referencia w_ref** (capitalización o referencia estratégica documentada — decisión del equipo):")
     ref_default = pd.Series(ctrl["w_ref"], index=ctrl["assets"]) if is_control else pd.Series(1 / len(assets), index=assets)
@@ -858,21 +794,7 @@ def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds, group
         sens = pd.DataFrame(rows).set_index("escenario")
         st.dataframe(sens.style.format("{:.2%}", na_rep="—"))
 
-    _explain("¿Qué significa Black-Litterman?", """
-- **Idea:** en vez de confiar ciegamente en los rendimientos históricos (muy ruidosos), se parte de un **prior**: los
-  rendimientos que "justificarían" una cartera de referencia, π = δ·Σ·w_ref. Luego se **mezclan** con las opiniones del
-  equipo según cuánta confianza tengan. El resultado es la **posterior**, que después se optimiza igual que en Markowitz.
-- **δ:** aversión al riesgo implícita de la cartera de referencia. **γ** es la del inversionista (otra cosa).
-- **τ:** cuánta incertidumbre hay sobre el prior. Escala la matriz B = τ·Σ.
-- **View absoluta:** "A rendirá 3 % en exceso". **View relativa:** "A rendirá 1 punto menos que B". Si escribes una
-  absoluta en rendimiento **total**, se convierte a exceso restando rf.
-- **Ω (omega):** la incertidumbre de cada view (varianza). Ω grande ⇒ la view casi no mueve nada; Ω = 0 ⇒ certeza
-  total (la posterior cumple la view exactamente). **Confianza 0 excluye la view**, no la vuelve certeza.
-- **M:** incertidumbre que queda sobre la **media** después de las views (no es riesgo de los retornos). **Σ predictiva**
-  = Σ + M se usa solo como variante etiquetada.
-- **Controles:** sin views la posterior es igual al prior; si una view dice exactamente lo que el prior ya implica, nada
-  cambia. Las views vencidas, repetidas o contradictorias se excluyen o se advierten.
-""")
+    _explain("¿Qué es Black-Litterman?", AYUDA["bl"])
     return res
 
 
@@ -896,15 +818,7 @@ def _tab_rebalance(lab: LabData, gamma: float, bounds, groups=None):
     cash_min = c4.number_input("Caja mínima", value=0.0, min_value=0.0, step=50.0, key="lab_reb_cashmin",
                                help="Efectivo que siempre se deja aparte; los pesos objetivo se aplican al resto.")
     fractional = c5.toggle("Fracciones de unidad", value=bool(ctrl["fracciones"]), key="lab_reb_frac")
-    _explain("¿Qué significa cada parámetro del rebalanceo y qué pongo?", """
-- **Cantidades y precios:** la cartera que tienen hoy y los precios de antes y de ahora. Con eso se ve cuánto **derivaron** los pesos.
-- **Peso objetivo:** a dónde quieren volver (por ejemplo, la cartera elegida en Markowitz o en Black-Litterman).
-- **Costo por nominal:** comisión de su bróker como fracción de lo negociado (0,001 = 0,1 %). Se cobra en cada compra y venta.
-- **Banda de no operación:** si ningún peso se aleja del objetivo más que esto, **no se opera** (evita pagar costos por
-  movimientos pequeños). Típico: entre 2 % y 10 %.
-- **Caja mínima:** efectivo que siempre se conserva (para gastos, retiros o margen); los pesos se aplican al resto.
-- **Fracciones de unidad:** si se pueden comprar fracciones de acción. Si no, se redondea hacia abajo y sobra caja.
-""")
+    _explain("¿Qué pongo aquí?", AYUDA["rebalanceo_parametros"])
     edited = edited.dropna(subset=["activo"])
     if edited.empty:
         return
@@ -952,18 +866,7 @@ def _tab_rebalance(lab: LabData, gamma: float, bounds, groups=None):
     if lab.returns is not None and len(lab.returns) > 60:
         _policy_simulation(lab, gamma, bounds, groups, cost, band, cash_min)
 
-    _explain("¿Qué significa rebalancear y cómo se decide?", """
-- **Deriva:** si no haces nada, los pesos cambian solos porque cada activo rinde distinto: w_nuevo = w_anterior·(1+R_i)/(1+R_p).
-- **Rebalancear:** comprar y vender para volver a los pesos objetivo. Cuesta dinero (comisiones), así que no siempre conviene.
-- **Política del equipo:** una **regla periódica** (cada X días) y/o una **regla por umbral** (si la deriva supera una
-  banda, o si hay un evento: noticia, cambio de riesgo, vencimiento de una view). Fuera de eso, **abstenerse** también es
-  una decisión correcta.
-- **Costos:** se cobran sobre el valor real de cada compra y venta (nominal negociado), y los pesos objetivo se aplican
-  sobre el patrimonio que queda después de pagarlos.
-- **Turnover:** ½·Σ|Δw|, qué porcentaje de la cartera "rotó".
-- **Caja:** nunca puede quedar negativa (eso sería endeudarse sin autorización). Con unidades enteras sobra algo de caja.
-- **Eventos repetidos** no generan una segunda operación, y datos viejos o precios desincronizados **suspenden** la decisión.
-""")
+    _explain("¿Qué es rebalancear?", AYUDA["rebalanceo"])
 
 
 def _policy_simulation(lab: LabData, gamma, bounds, groups, cost, band, cash_min):
@@ -989,17 +892,7 @@ def _policy_simulation(lab: LabData, gamma, bounds, groups, cost, band, cash_min
     info_events = st.toggle("Las views que vencen o entran en vigencia disparan revisión", value=True, key="lab_pol_info")
     rule = st.radio("Objetivo recalculado en cada decisión", ["1/N", "GMV", "Óptimo personal", "BL posterior"], horizontal=True,
                     key="lab_pol_target")
-    _explain("¿Qué significa cada regla de la política?", """
-- **Ventana de estimación:** cuántas observaciones pasadas se usan para estimar μ y Σ en cada decisión.
-- **Regla periódica:** revisar cada X días aunque nada haya cambiado. **Banda:** revisar si la deriva supera la banda (arriba).
-- **Espera mínima:** días que deben pasar entre operaciones, para no operar de más.
-- **Rotación máxima:** si una operación movería más que este porcentaje de la cartera, se abstiene.
-- **Costo-beneficio (P85):** compara la mejora de utilidad U = w'μ − (γ/2)·w'Σw de ir al nuevo objetivo contra el costo de
-  operar; si la mejora menos el costo no supera el margen, no se opera.
-- **Eventos de información:** cuando una view registrada vence o empieza a regir, se revisa la cartera.
-- **Objetivo:** 1/N, mínima varianza, óptimo personal con γ, o Black-Litterman con las views vigentes en esa fecha.
-- **Duplicados:** un evento repetido no genera otra decisión; queda en el libro como "duplicado, sin decisión".
-""")
+    _explain("¿Qué significa cada regla?", AYUDA["politica"])
     views = st.session_state.get("lab_views", []) if rule == "BL posterior" else []
     bl = st.session_state.get("lab_bl_params", {})
     w_ref = bl.get("w_ref")
@@ -1068,17 +961,7 @@ def _tab_backtest(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None)
     st.caption(f"Black-Litterman usará {len(views)} view(s) registrada(s) en su pestaña, cada una solo entre su fecha "
                "«conocida desde» y su vencimiento." if views else
                "Sin views registradas: Black-Litterman usa solo el prior (con γ = δ y w_ref = 1/N coincide con 1/N, y se rotula así).")
-    _explain("¿Qué significa cada parámetro del backtest y qué pongo?", """
-- **Ventana de estimación:** cuántas observaciones pasadas usa cada decisión. Corta = reacciona rápido pero es ruidosa;
-  larga = estable pero lenta.
-- **Rebalancear cada:** cada cuántos periodos se recalculan los pesos (21 días ≈ un mes de negociación).
-- **Costo por nominal:** comisión sobre lo negociado; castiga a las estrategias que rotan mucho.
-- **Fracción para validación:** qué parte del periodo evaluado se usa para **elegir** (validación). El resto es la
-  **prueba final**, que solo se mira después de elegir.
-- **Estimadores de Σ:** muestral, Ledoit-Wolf (encogido) o EWMA (más peso a lo reciente). Cada combinación
-  estrategia × estimador es un candidato.
-- **Criterio de selección:** con qué métrica se elige el candidato en validación (el drawdown se elige el menos negativo).
-""")
+    _explain("¿Qué pongo aquí?", AYUDA["backtest_parametros"])
     if not strategies or not estimators:
         return
     if st.button("Ejecutar backtest", key="lab_bt_run", type="primary"):
@@ -1117,27 +1000,209 @@ def _tab_backtest(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None)
                      .format("{:.2f}", subset=pd.IndexSlice[["Sharpe anual"], :]))
     except ValueError as exc:
         st.warning(str(exc))
-    _explain("¿Qué significa cada indicador?", INDICATORS_HELP)
+    _explain("¿Qué significa cada número?", AYUDA["indicadores"])
     for name, run in res.runs.items():
         if run.failures:
             st.warning(f"{name}: {len(run.failures)} fecha(s) sin solución del optimizador; se conservó la cartera anterior. "
                        f"Primera: {run.failures[0]}")
     st.caption("Reporten también las variantes que probaron y los resultados adversos: elegir solo la que mejor lució "
                "después de verla es sobreajuste. Un backtest ganador no prueba causalidad ni que se repita.")
-    _explain("¿Qué significa el backtest walk-forward?", """
-- **Walk-forward:** se "camina" por la historia. En cada fecha de decisión se estiman μ y Σ **solo con datos pasados**
-  (la ventana), se eligen los pesos y se aplican hacia adelante. Así se simula lo que se habría sabido en ese momento.
-- **Estrategias:** *mantener cantidades* (compra 1/N y no vuelve a operar), *1/N rebalanceado*, *mínima varianza*,
-  *Markowitz con γ* y *Black-Litterman* (prior de equilibrio con referencia 1/N, sin views).
-- **Costos:** se cobran sobre lo negociado en cada rebalanceo; por eso operar mucho puede salir caro.
-- **Validación vs. prueba final:** los parámetros (ventana, frecuencia, γ) se ajustan mirando validación. La prueba final
-  es el examen: si se ajusta mirándola, deja de ser una prueba honesta.
-- **Métricas:** rendimiento anual neto, volatilidad, Sharpe, peor caída (drawdown), rotación y cuánto cambian los pesos
-  objetivo entre decisiones (estabilidad).
-""")
+    _explain("¿Qué es un backtest?", AYUDA["backtest"])
 
 
-def _tab_capm(lab: LabData):
+def _benchmark_returns(lab: LabData, bench: str) -> "pd.Series | None":
+    """Rendimientos simples del benchmark en la frecuencia y la moneda base del laboratorio."""
+    result = st.session_state.get("comparison_result")
+    asset = fetch_asset_data(bench, result.common_start, result.common_end + pd.Timedelta(days=1))
+    if not asset.ok:
+        st.error(f"{bench}: {asset.error}")
+        return None
+    prices = resample_prices(asset.prices, result.frequency)[["adjusted_close"]]
+    if prices.index.tz is not None:
+        prices.index = prices.index.tz_localize(None)
+    bench_ccy = str(asset.currency or lab.currency or "USD").upper()
+    if lab.currency and bench_ccy != lab.currency:
+        try:
+            prices, note = _to_base_currency(prices, bench_ccy, lab.currency)
+        except ValueError as exc:
+            st.error(f"El benchmark está en {bench_ccy} y la cartera en {lab.currency}: {exc}")
+            return None
+        st.caption(f"Benchmark: {note}")
+    return prices["adjusted_close"].pct_change(fill_method=None)
+
+
+PORTFOLIO_NAMES = {"gmv": "Mínima varianza (GMV)", "tangent": "Tangente (máximo Sharpe)", "personal": "Óptimo personal",
+                   "top": "Máximo rendimiento esperado"}
+
+
+def _portfolio_series(lab: LabData, results) -> "dict[str, pd.Series]":
+    """Rendimientos históricos (pesos constantes) de cada cartera óptima válida y de 1/N."""
+    out = {}
+    for key, name in PORTFOLIO_NAMES.items():
+        res = (results or {}).get(key)
+        if res is not None and res.ok:
+            out[name] = portfolio_return_series(lab.returns, res.weights)
+    n = lab.returns.shape[1]
+    out["1/N (referencia simple)"] = portfolio_return_series(lab.returns, pd.Series(1.0 / n, index=lab.returns.columns))
+    return out
+
+
+def _capm_and_performance(lab: LabData, results, betas: pd.Series, mret: pd.Series, rf_ea: float, bench_name: str):
+    """Rendimiento requerido por CAPM (SML) por activo y cartera, y desempeño frente al benchmark."""
+    if betas.empty:
+        return
+    m = lab.m
+    rf_p = rf_per_period(rf_ea, m)
+    common = mret.reindex(lab.returns.index)
+    st.markdown("**Rendimiento requerido por CAPM y línea del mercado de títulos (SML)**")
+    erp_mode = st.radio("Prima de mercado (ERP) — decisión del equipo",
+                        ["Histórica del benchmark en esta ventana", "Escrita por el equipo"], horizontal=True,
+                        key="lab_capm_erp_mode")
+    if erp_mode == "Escrita por el equipo":
+        erp = st.number_input("ERP anual", value=0.0, step=0.005, format="%.4f", key="lab_capm_erp",
+                              help="Prima esperada del mercado sobre rf; el equipo la justifica (fuente, periodo, moneda).")
+    else:
+        erp = historical_erp(common, rf_p, m)
+        st.caption(f"ERP histórica de {bench_name} = (media de su rendimiento − rf del periodo) × {m} = **{erp:.2%}** anual "
+                   "en la misma muestra. Es una estimación del pasado, no una predicción.")
+    rows = []
+    for a, b in betas.items():
+        rows.append({"activo o cartera": a, "beta": b, "requerido CAPM": capm_required_return(rf_ea, b, erp),
+                     "esperado histórico (μ·m)": float(lab.mu[a] * m)})
+    port_betas = {}
+    for key, name in PORTFOLIO_NAMES.items():
+        res = (results or {}).get(key)
+        if res is None or not res.ok:
+            continue
+        try:
+            pb = portfolio_beta(res.weights, betas)
+        except ValueError:
+            continue
+        port_betas[name] = pb
+        rows.append({"activo o cartera": name, "beta": pb, "requerido CAPM": capm_required_return(rf_ea, pb, erp),
+                     "esperado histórico (μ·m)": float(res.weights @ lab.mu * m)})
+    capm_df = pd.DataFrame(rows)
+    capm_df["diferencia (esperado − requerido)"] = capm_df["esperado histórico (μ·m)"] - capm_df["requerido CAPM"]
+    st.dataframe(capm_df.style.format({c: "{:.2%}" for c in capm_df.columns if c not in ("activo o cartera", "beta")}
+                                      | {"beta": "{:.3f}"}), hide_index=True)
+    xs = np.linspace(min(0.0, capm_df["beta"].min() - 0.2), max(2.0, capm_df["beta"].max() + 0.2), 30)
+    fig = go.Figure(go.Scatter(x=xs, y=[capm_required_return(rf_ea, x, erp) for x in xs], name="SML", line=dict(color=ACCENT_GOLD)))
+    is_port = capm_df["activo o cartera"].isin(port_betas.keys())
+    fig.add_trace(go.Scatter(x=capm_df.loc[~is_port, "beta"], y=capm_df.loc[~is_port, "esperado histórico (μ·m)"],
+                             mode="markers+text", text=capm_df.loc[~is_port, "activo o cartera"], textposition="top center",
+                             name="activos (esperado histórico)", marker=dict(size=9, color=ELECTRIC_BLUE)))
+    fig.add_trace(go.Scatter(x=capm_df.loc[is_port, "beta"], y=capm_df.loc[is_port, "esperado histórico (μ·m)"],
+                             mode="markers", name="carteras", marker=dict(size=12, symbol="star", color=STAR_WHITE),
+                             text=capm_df.loc[is_port, "activo o cartera"], hovertemplate="%{text}<extra></extra>"))
+    fig.update_layout(title=f"SML: rf = {rf_ea:.2%}, ERP = {erp:.2%}, proxy de mercado = {bench_name}",
+                      xaxis_title="Beta", yaxis_title="Rendimiento anual", yaxis_tickformat=".0%", height=380, **LAYOUT)
+    st.plotly_chart(fig)
+    st.caption(f"Declarado: proxy de mercado {bench_name}, rf = {rf_ea:.2%} EA (supuestos del laboratorio), ventana "
+               f"{lab.returns.index[0].date()} a {lab.returns.index[-1].date()}, frecuencia {lab.frequency}. Un punto sobre la SML "
+               "rindió en la muestra más de lo que su beta exige; no implica que lo siga haciendo.")
+
+    st.markdown(f"**Desempeño frente al benchmark {bench_name} (misma muestra y frecuencia)**")
+    table = performance_table(_portfolio_series(lab, results) | {f"Benchmark {bench_name}": common}, common, rf_p, m)
+    show = table.rename(columns={"n": "n", "ann_return": "rendimiento anual", "ann_vol": "volatilidad anual", "sharpe": "Sharpe",
+                                 "beta": "beta", "r_squared": "R²", "systematic_share": "riesgo sistemático",
+                                 "idiosyncratic_share": "riesgo no sistemático", "treynor": "Treynor",
+                                 "jensen_alpha": "alfa de Jensen", "tracking_error": "error de seguimiento",
+                                 "information_ratio": "razón de información"})
+    pct = ["rendimiento anual", "volatilidad anual", "riesgo sistemático", "riesgo no sistemático", "Treynor",
+           "alfa de Jensen", "error de seguimiento"]
+    st.dataframe(show.style.format({c: "{:.2%}" for c in pct if c in show} | {c: "{:.3f}" for c in
+                                   ("Sharpe", "beta", "R²", "razón de información") if c in show}, na_rep="—"))
+    _explain("¿Qué significa cada indicador?", AYUDA["desempeno"])
+
+
+def _market_betas(lab: LabData, results, rf_ea: float = 0.0):
+    """Betas de los activos reales (OLS y Cov/Var), beta de cada cartera y Hamada sobre un activo."""
+    st.markdown("#### Beta de los activos frente a un benchmark")
+    bench = st.text_input("Ticker del benchmark (decisión del equipo; ej. ^GSPC, ^COLCAP)", value="", key="lab_beta_bench")
+    if not bench.strip():
+        return
+    mret = _benchmark_returns(lab, bench.strip())
+    if mret is None:
+        return
+    fits = {a: beta_ols(lab.returns[a], mret) for a in lab.returns.columns}
+    table = pd.DataFrame({
+        "beta (OLS)": {a: f.beta for a, f in fits.items()},
+        "beta (Cov/Var)": {a: f.beta_cov_ratio for a, f in fits.items()},
+        "diferencia": {a: f.beta - f.beta_cov_ratio for a, f in fits.items()},
+        "alfa (por periodo)": {a: f.alpha for a, f in fits.items()},
+        "EE": {a: f.std_error for a, f in fits.items()},
+        "R²": {a: f.r_squared for a, f in fits.items()},
+        "riesgo sistemático": {a: f.r_squared for a, f in fits.items()},
+        "riesgo no sistemático": {a: 1 - f.r_squared for a, f in fits.items()},
+        "n": {a: f.n for a, f in fits.items()},
+        "estado": {a: f.status for a, f in fits.items()},
+    })
+    table.index.name = "activo"
+    st.dataframe(table.style.format({"beta (OLS)": "{:.4f}", "beta (Cov/Var)": "{:.4f}", "diferencia": "{:.1e}",
+                                     "alfa (por periodo)": "{:.6f}", "EE": "{:.3f}", "R²": "{:.2f}",
+                                     "riesgo sistemático": "{:.1%}", "riesgo no sistemático": "{:.1%}"}, na_rep="—"))
+    st.caption(f"Beta frente a {bench.strip().upper()} en {lab.currency or 'la moneda de la Comparación'} (sensibilidad a esa "
+               "referencia, no automáticamente al «mercado» teórico). La beta sale por dos caminos —pendiente de la regresión "
+               "OLS y Cov(activo, benchmark)/Var(benchmark)— que deben coincidir (P2-31); la columna «diferencia» lo muestra. "
+               "rf = 0 en esta tabla porque se usa la misma muestra para todos. **Riesgo sistemático = R²**: parte de la "
+               "varianza del activo que explica el benchmark (β²σ²_m/σ²); el resto (1 − R²) es no sistemático y se puede "
+               "diversificar.")
+    st.session_state["lab_bench_returns"] = mret
+    st.session_state["lab_bench_name"] = bench.strip().upper()
+
+    ok = {a: f.beta for a, f in fits.items() if f.status == "ok"}
+    betas = pd.Series(ok, dtype=float)
+
+    st.markdown("**Beta de cada cartera (suma ponderada de las betas de arriba)**")
+    if not results:
+        st.info("Abre el módulo «Markowitz y fronteras» para calcular las carteras.")
+    else:
+        names = {"gmv": "Mínima varianza (GMV)", "tangent": "Tangente (máximo Sharpe)", "personal": "Óptimo personal",
+                 "top": "Máximo rendimiento esperado"}
+        rows = []
+        for key, name in names.items():
+            res = results.get(key)
+            if res is None or not res.ok:
+                rows.append({"cartera": name, "beta de cartera": None, "nota": "sin cartera válida"})
+                continue
+            try:
+                rows.append({"cartera": name, "beta de cartera": portfolio_beta(res.weights, betas), "nota": ""})
+            except ValueError as exc:
+                rows.append({"cartera": name, "beta de cartera": None, "nota": str(exc)})
+        st.dataframe(pd.DataFrame(rows).style.format({"beta de cartera": "{:.4f}"}, na_rep="—"), hide_index=True)
+        st.caption("β_cartera = Σ wᵢ βᵢ (guía, sección 8; P102 y P104). Solo vale si todas las betas salen de la misma muestra, "
+                   "el mismo benchmark y la misma convención de rendimientos, como en esta tabla; si se cambia alguno, hay "
+                   "que recalcular todas.")
+
+    _capm_and_performance(lab, results, betas, mret, rf_ea, bench.strip().upper())
+
+    st.markdown("**Hamada sobre un activo real: desapalancar y reapalancar**")
+    if betas.empty:
+        st.info("Ningún activo tiene beta calculable con este benchmark.")
+        return
+    c1, c2, c3, c4, c5 = st.columns(5)
+    asset = c1.selectbox("Activo", list(betas.index), key="lab_hamada_asset")
+    de_now = c2.number_input("D/E actual (decisión del equipo)", value=0.0, min_value=0.0, step=0.05, format="%.4f",
+                             key="lab_hamada_de", help="Deuda/patrimonio actual de esa empresa, de sus estados financieros.")
+    tax = c3.number_input("Impuesto (decisión del equipo)", value=0.0, min_value=0.0, max_value=1.0, step=0.01,
+                          format="%.4f", key="lab_hamada_tax", help="Tasa marginal de impuestos de esa empresa (0,35 = 35 %).")
+    beta_d = c4.number_input("Beta de la deuda (decisión del equipo)", value=0.0, step=0.05, format="%.4f",
+                             key="lab_hamada_bd", help="0 = la deuda no tiene riesgo sistemático.")
+    de_target = c5.number_input("D/E objetivo (decisión del equipo)", value=0.0, min_value=0.0, step=0.05, format="%.4f",
+                                key="lab_hamada_target", help="Estructura de capital a la que se reapalanca.")
+    b_l = float(betas[asset])
+    b_u = unlever_beta(b_l, de_now, tax, beta_d)
+    b_new = relever_beta(b_u, de_target, tax, beta_d)
+    m1, m2, m3 = st.columns(3)
+    m1.metric(f"Beta observada de {asset} (βL)", f"{b_l:.4f}")
+    m2.metric("Beta desapalancada (βU)", f"{b_u:.4f}")
+    m3.metric(f"Beta reapalancada a D/E = {de_target:g}", f"{b_new:.4f}")
+    st.caption("βU = [βL + β_deuda·(1 − t)·D/E] / [1 + (1 − t)·D/E] y βL' = βU + (βU − β_deuda)·(1 − t)·D/E' (Hamada). "
+               "Los cuatro valores son del equipo y dependen de cada empresa: no se usan los del caso Alimentos. Con todo "
+               "en 0 la beta no cambia.")
+
+
+def _tab_capm(lab: LabData, results=None, rf_ea: float = 0.0):
     params = _load_json("caso_alimentos_parametros.json")
     r = pd.read_csv(PAQUETE_DATA / "caso_alimentos_retornos.csv").set_index("anio")
     st.markdown(f"#### Caso docente congelado: {params['empresa']}")
@@ -1163,22 +1228,7 @@ def _tab_capm(lab: LabData):
     st.info("**Pendiente de confirmar:** la regla del caso que usa `capacidad_ventas` y `capex_venta_adicional` para "
             "calcular el CAPEX y la depreciación está en el PDF del caso, que no está en el repositorio. Mientras el "
             "equipo la confirma, el CAPEX y la depreciación de cada año se escriben a mano en la tabla.")
-    _explain("¿Qué significa cada entrada de la valoración y qué pongo?", """
-- **Crecimiento de ventas:** cuánto cambian las ventas cada año (0,05 = 5 %). Es un supuesto del equipo: debe salir del
-  análisis del negocio (mercado, precios, capacidad).
-- **Costo variable %:** costo variable como fracción de las ventas (el caso parte de 60 %). Cambiarlo es cambiar el margen.
-- **Gastos fijos:** gastos que no dependen de las ventas (el caso parte de 33.000 millones).
-- **CAPEX y depreciación:** inversión en activos fijos y su gasto contable por año. CAPEX igual a la depreciación solo
-  repone; para crecer hay que invertir más.
-- **Deuda:** saldo de deuda financiera al cierre de cada año (el caso parte de 45.000). Afecta intereses, FCFE y el covenant.
-- **Kd:** costo de la deuda (13,5 % en el caso; el equipo debe confirmar que está en COP).
-- **D/E:** deuda/patrimonio para los pesos del WACC (0,75 en el caso). Con "iterar D/E" la app lo hace coherente con el
-  patrimonio estimado.
-- **g terminal:** crecimiento perpetuo después del año 5; debe ser menor que el WACC y que Ke, y coherente con la
-  reinversión (g = reinversión × ROIC).
-- **Escenarios:** choque del tipo de cambio sobre los insumos importados, rezago de días para trasladar ese costo a
-  precios (el caso menciona 60 días) y cambio de la tasa de la deuda. Las magnitudes son del equipo.
-""")
+    _explain("¿Qué pongo aquí?", AYUDA["valoracion_entradas"])
     c1, c2, c3 = st.columns(3)
     kd = c1.number_input("Kd efectiva anual", value=float(params["kd_EA"]), step=0.005, format="%.4f", key="lab_val_kd",
                          help="Del caso: 13,5 %. El equipo debe confirmar que está en COP, igual que los flujos.")
@@ -1273,26 +1323,7 @@ def _tab_capm(lab: LabData):
         (st.success if chk.consistent else st.warning)(chk.message)
 
     if lab.source == SOURCE_MARKET and lab.returns is not None:
-        st.markdown("#### Beta de los activos frente a un benchmark")
-        bench = st.text_input("Ticker del benchmark (decisión del equipo; ej. ^GSPC, ^COLCAP)", value="", key="lab_beta_bench")
-        if bench.strip():
-            result = st.session_state.get("comparison_result")
-            asset = fetch_asset_data(bench, result.common_start, result.common_end + pd.Timedelta(days=1))
-            if not asset.ok:
-                st.error(f"{bench}: {asset.error}")
-            else:
-                prices = resample_prices(asset.prices, result.frequency)["adjusted_close"]
-                if prices.index.tz is not None:
-                    prices.index = prices.index.tz_localize(None)
-                mret = prices.pct_change(fill_method=None)
-                rows = []
-                for a in lab.returns.columns:
-                    b = beta_ols(lab.returns[a], mret)
-                    rows.append({"activo": a, "beta": b.beta, "EE": b.std_error, "R²": b.r_squared, "n": b.n, "estado": b.status})
-                betas = pd.DataFrame(rows).set_index("activo")
-                st.dataframe(betas.style.format({"beta": "{:.3f}", "EE": "{:.3f}", "R²": "{:.2f}"}, na_rep="—"))
-                st.caption(f"Beta frente a {bench.upper()} (sensibilidad a esa referencia, no automáticamente al «mercado» teórico); "
-                           "rf constante = 0 en esta tabla porque se usa la misma muestra para todos.")
+        _market_betas(lab, results, rf_ea)
 
     erp = params["erp_madura"]
     xs = np.linspace(0, 2, 20)
@@ -1305,19 +1336,7 @@ def _tab_capm(lab: LabData):
                       yaxis_tickformat=".0%", height=360, **LAYOUT)
     st.plotly_chart(fig)
 
-    _explain("¿Qué significan beta, CAPM, Hamada, Ke, WACC y DCF?", """
-- **Beta (β):** cuánto se mueve un activo cuando se mueve el benchmark. β = 1,5 ⇒ si el mercado sube 1 %, el activo
-  tiende a subir 1,5 %. Se estima con una regresión de excesos sobre rf; un benchmark que no se mueve deja β indefinida.
-- **SML (línea del mercado de valores):** rendimiento **requerido** = rf + β·ERP. El eje es β, no la volatilidad total.
-- **Hamada:** la beta de una empresa con deuda (apalancada) es mayor que la de su negocio puro. Se **desapalanca** la
-  beta del comparable con su D/E y se **reapalanca** con la D/E de la empresa, con el mismo supuesto de deuda.
-- **Ke (costo del patrimonio):** rf + β·ERP, y la **prima país** se suma aparte una sola vez. Para pasar de USD a COP se
-  usa la paridad de inflación (no se suman inflaciones, y no es una predicción de la TRM).
-- **WACC:** costo promedio de financiarse = peso del patrimonio·Ke + peso de la deuda·Kd·(1−t).
-- **FCFF y DCF:** el flujo de caja libre para la empresa se descuenta al WACC; después del año 5, un **valor terminal**
-  con crecimiento g, que solo existe si WACC > g. Si el terminal pesa mucho en el EV, el resultado depende mucho de g.
-- **EV → patrimonio:** al valor de la empresa se le resta la deuda financiera (y se suma caja excedente si la hay).
-""")
+    _explain("¿Qué significan beta, CAPM y las demás palabras?", AYUDA["capm_valoracion"])
 
 
 def _trace_context(lab: LabData) -> dict:
@@ -1325,8 +1344,10 @@ def _trace_context(lab: LabData) -> dict:
     ctx = {"frequency": lab.frequency or ("anual (parámetros dados)" if lab.m == 1 else None)}
     if lab.source == SOURCE_MARKET:
         result = st.session_state.get("comparison_result")
-        ctx.update(currency=getattr(result, "base_currency", None),
-                   source_fields=["Close con auto_adjust=True (cierre ajustado por dividendos y splits)"])
+        ctx.update(currency=lab.currency or getattr(result, "base_currency", None),
+                   source_fields=["Close con auto_adjust=True (cierre ajustado por dividendos y splits)"]
+                   + ([f"{FX_TICKER_COP_PER_USD} (COP por USD) para la moneda base"] if lab.currency and lab.fx_note
+                      and "Convertido" in lab.fx_note else []))
     elif lab.source == SOURCE_SYNTH:
         ctx.update(source_fields=["paquete_v2/data/precios_sinteticos_20.csv (columnas SIM1..SIM20)"])
     if lab.returns is not None:
@@ -1334,13 +1355,101 @@ def _trace_context(lab: LabData) -> dict:
             event_at=str(pd.Timestamp(lab.last_date).date()) if lab.last_date is not None else None,
             missing_data_rule=(f"Rendimientos simples sin rellenar huecos; los que cruzan un intervalo mayor al normal para la "
                                f"frecuencia {lab.frequency} se anulan ({lab.gap_removed}); luego máscara común de filas completas."),
-            transformations=["orden por fecha", "pct_change(fill_method=None) por activo", "anulación de rendimientos sobre huecos",
-                             "máscara común (dropna)", "media y covarianza muestral ddof=1"],
+            transformations=(["conversión a la moneda base: " + lab.fx_note] if lab.fx_note and "Convertido" in lab.fx_note else [])
+            + ["orden por fecha", "pct_change(fill_method=None) por activo", "anulación de rendimientos sobre huecos",
+               "máscara común (dropna)", "media y covarianza muestral ddof=1"],
         )
     triggers = st.session_state.get("lab_trigger_ids", [])
     if triggers:
         ctx["trigger_id"] = triggers[-1]
     return ctx
+
+
+def _constraints_text(bounds, groups, unlimited: bool, assets) -> str:
+    if unlimited:
+        return "Pesos sin límites (cortos y apalancamiento permitidos); suma de pesos = 100 %."
+    uniq = {tuple(b) for b in bounds}
+    text = (f"Cada activo entre {list(uniq)[0][0]:.0%} y {list(uniq)[0][1]:.0%}" if len(uniq) == 1
+            else "Cotas por activo: " + ", ".join(f"{a} [{b[0]:.0%}, {b[1]:.0%}]" for a, b in zip(assets, bounds)))
+    if groups:
+        text += "; topes por sector: " + ", ".join(f"{'+'.join(g)} ≤ {cap:.0%}" for g, cap in groups)
+    return text + "; suma de pesos = 100 %."
+
+
+def _tab_factsheet(lab: LabData, results, rf_ea, gamma, bounds, groups, sectors, unlimited):
+    st.markdown("#### Ficha técnica del portafolio")
+    st.caption("Estructura de la ficha técnica de los Fondos de Inversión Colectiva de la Superintendencia Financiera de "
+               "Colombia (Decreto 1242 de 2013; Circular Básica Jurídica, Anexo 6). Es una **simulación académica**: los "
+               "campos propios de un fondo real (valor del fondo, comisiones, calificación, custodio) se marcan «No aplica».")
+    if not results:
+        st.info("Abre el módulo «Markowitz y fronteras» para calcular las carteras.")
+        return
+    options = {"Tangente (máximo Sharpe)": ("tangent", f"Maximizar la razón de Sharpe con rf = {rf_ea:.2%} EA."),
+               "Mínimo riesgo (GMV)": ("gmv", "Minimizar la varianza de la cartera."),
+               "Mayor rendimiento esperado": ("top", "Maximizar el rendimiento esperado dentro de las restricciones."),
+               "Óptimo personal": ("personal", f"Maximizar U = μ − (γ/2)σ² con γ = {gamma:g}.")}
+    choice = st.selectbox("Cartera", list(options), key="lab_factsheet_choice")
+    key, objective = options[choice]
+    res = results.get(key)
+    if res is None or not res.ok:
+        st.warning(f"La cartera «{choice}» no tiene solución válida con estas restricciones ({getattr(res, 'status', 'N/D')}).")
+        return
+    m = lab.m
+    stats = portfolio_stats(res.weights, lab.mu, lab.sigma)
+    asset_ccy = None
+    result = st.session_state.get("comparison_result")
+    if lab.source == SOURCE_MARKET and result is not None:
+        asset_ccy = {sm.ticker: sm.currency for sm in getattr(result, "summaries", [])}
+    extra = [("Rendimiento esperado del modelo (μ·m)", _pct(stats.mean * m)),
+             ("Volatilidad esperada del modelo (σ·√m)", _pct(stats.volatility * np.sqrt(m)))]
+    bench = st.session_state.get("lab_bench_returns")
+    if bench is not None and lab.returns is not None:
+        b = beta_ols(portfolio_return_series(lab.returns, res.weights), bench.reindex(lab.returns.index))
+        if b.status == "ok":
+            extra.append((f"Beta frente a {st.session_state.get('lab_bench_name', 'benchmark')}", f"{b.beta:.3f}"))
+    fs = build_factsheet(f"Cartera {choice} — {BRAND}", res.weights, lab.returns, m, lab.currency, objective,
+                         _constraints_text(bounds, groups, unlimited, list(lab.mu.index)), rf_ea, TEAM, INSTITUTION,
+                         asset_currency=asset_ccy, sectors=sectors or None, extra_risk=extra)
+    def md_table(rows):  # tabla en Markdown: el texto largo se ajusta en vez de cortarse
+        return "| Campo | Valor |\n|---|---|\n" + "\n".join(f"| {k} | {v} |" for k, v in rows)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**1. Características**")
+        st.markdown(md_table(fs.general))
+    with c2:
+        st.markdown("**2. Política de inversión**")
+        st.markdown(md_table(fs.policy))
+    st.markdown("**3. Rentabilidad y volatilidad histórica** (efectiva anual por ventana)")
+    st.dataframe(fs.performance.T.apply(lambda col: col.map(lambda v: "N/D" if pd.isna(v) else f"{v:.2%}")))
+    if fs.performance.isna().all().all():
+        st.caption("N/D: esta fuente no tiene serie de precios con fechas (caso docente con parámetros dados).")
+    if fs.value_path is not None and len(fs.value_path) > 1:
+        fig = go.Figure(go.Scatter(x=fs.value_path.index, y=fs.value_path, line=dict(color=ACCENT_GOLD), name="valor"))
+        fig.update_layout(title=f"Evolución de 100.000 {lab.currency or ''} invertidos (pesos constantes, sin costos)",
+                          height=320, **LAYOUT)
+        st.plotly_chart(fig)
+    c1, c2, c3 = st.columns(3)
+    for col, series, title in ((c1, fs.composition_asset, "4. Composición por activo"),
+                               (c2, fs.composition_currency, "Por moneda de origen"),
+                               (c3, fs.composition_sector, "Por sector")):
+        with col:
+            st.markdown(f"**{title}**")
+            if series.empty:
+                st.caption("N/D" + (" — asignen sectores en «Cotas por activo y topes por sector»." if "sector" in title else ""))
+            else:
+                st.dataframe(series.rename("peso").to_frame().style.format("{:.2%}"))
+    st.markdown("**5. Principales inversiones** (hasta 10, por |peso|)")
+    st.dataframe(fs.top_holdings.rename("|peso|").to_frame().T.style.format("{:.2%}"))
+    st.markdown("**6. Riesgo**")
+    st.markdown(md_table(fs.risk))
+    with st.expander("7. Campos de la ficha oficial que no aplican a una simulación"):
+        for item in fs.not_applicable:
+            st.write(f"- {item}: {NOT_APPLICABLE}")
+    st.caption("Rentabilidades pasadas no garantizan rentabilidades futuras. No es asesoría financiera ni una oferta de "
+               "inversión, y el bot no ejecuta órdenes.")
+    st.download_button("Descargar ficha técnica (Markdown)", to_markdown(fs).encode("utf-8"),
+                       file_name=f"ficha_tecnica_{key}.md", mime="text/markdown", key="lab_factsheet_md")
 
 
 def _tab_export(lab: LabData, rf_ea, gamma, bounds, groups, results):
@@ -1382,21 +1491,7 @@ def render_portfolio_lab() -> None:
         "Asignación de capital: riesgo conjunto, Markowitz, Black-Litterman, rebalanceo simulado, beta/CAPM y "
         "valoración. Simulación académica: no envía órdenes ni constituye recomendación de inversión."
     )
-    _explain("Qué es este laboratorio y qué decide el equipo", """
-La v1 analiza activos **uno por uno**. Este laboratorio arma **carteras**: combina activos con pesos y estudia su riesgo
-conjunto, elige carteras con distintos criterios, actualiza expectativas con opiniones, simula rebalanceos y calcula el
-costo de capital y el valor de una empresa.
-
-**La app calcula; las decisiones financieras son del equipo.** Los valores iniciales de las cajas vienen del **caso
-docente de control** (por ejemplo rf = 3 %, γ = 5, pesos entre 0 y 1) y están para reproducir ese caso, no porque sean
-los correctos para ustedes. Pendientes del equipo: mandato (moneda, horizonte, pérdida tolerable), universo, benchmark,
-tasa libre de riesgo, γ, límites de pesos, cartera de referencia y views de Black-Litterman, política de rebalanceo y
-proyección de la valoración.
-
-**Tres relojes:** la **cotización** cambia cada minuto (panel de abajo); la **estimación** (μ, Σ, correlaciones, beta)
-usa barras completas históricas y no tiene que cambiar con cada precio; la **decisión** (frontera, pesos, rebalanceo)
-solo cambia cuando la política del equipo lo indica.
-""")
+    _explain("¿Qué es este laboratorio?", AYUDA["laboratorio"])
 
     _render_live_quote()
     st.markdown("---")
@@ -1415,6 +1510,21 @@ solo cambia cuando la política del equipo lo indica.
             st.warning("**MODO LABORATORIO SINTÉTICO.** Series generadas para practicar: **no son cotizaciones reales**.")
         else:
             st.success("**MODO MERCADO.** Precios históricos de Yahoo Finance traídos en la sección Comparación.")
+        currency, fx_note = None, None
+        if source == SOURCE_MARKET:
+            from_ccy = str(getattr(st.session_state.get("comparison_result"), "base_currency", None) or "USD").upper()
+            currency = st.selectbox(
+                "Moneda base de la cartera (decisión del equipo)", list(SUPPORTED_BASES), index=0, key="lab_base_currency",
+                help="La moneda del mandato la decide el equipo. USD por defecto. Con COP, cada precio se convierte con "
+                     "USDCOP=X: P_COP = P_USD · FX, y los rendimientos quedan 1 + R_COP = (1 + R_USD)(1 + R_FX) (guía 3.2).")
+            try:
+                with st.spinner(f"Convirtiendo a {currency}..."):
+                    prices, fx_note = _to_base_currency(prices, from_ccy, currency)
+            except ValueError as exc:
+                st.error(str(exc))
+                return
+            label = f"{label} Moneda base: {currency}."
+            st.caption(f"**Moneda base: {currency}.** {fx_note}")
         all_assets = list(prices.columns)
         chosen = st.multiselect("Universo (decisión del equipo)", all_assets, default=all_assets, key=f"lab_universe_{source}")
         if len(chosen) < 2:
@@ -1425,23 +1535,24 @@ solo cambia cuando la política del equipo lo indica.
         except ValueError as exc:
             st.error(str(exc))
             return
+        lab.currency, lab.fx_note = currency, fx_note
     st.caption(lab.label + (" Frecuencia nativa: anual." if lab.m == 1 else f" Frecuencia nativa: {lab.m} periodos por año."))
 
     with st.container(border=True):
-        st.markdown("**Supuestos financieros (decisión del equipo; iniciales = caso docente de control)**")
+        st.markdown("**Reglas del ejercicio** (las decide el equipo; al abrir se ven las del ejemplo del profesor)")
         ctrl = _load_json("dos_activos.json")
         c1, c2, c3, c4 = st.columns(4)
         rf_ea = c1.number_input("Tasa libre de riesgo (efectiva anual)", value=float(ctrl["rf"]), step=0.005, format="%.4f", key="lab_rf",
-                                help="Rendimiento de un activo sin riesgo de impago en la moneda del análisis (p. ej. un "
-                                     "bono del Tesoro a corto plazo). Se convierte a la frecuencia de los datos.")
+                                help="Lo que ganarías al año **sin arriesgar nada**, por ejemplo prestándole al gobierno. "
+                                     "0,03 = 3 %. Mira la pestaña Tasas soberanas.")
         gamma = c2.number_input("γ aversión al riesgo", value=float(ctrl["gamma"]), min_value=0.1, step=0.5, key="lab_gamma",
-                                help="Cuánto castiga el inversionista el riesgo. Más alto = cartera más conservadora.")
+                                help="Qué tanto te asusta perder. 2 = te arriesgas bastante; 10 = prefieres ir a la segura.")
         lo = c3.number_input("Peso mínimo por activo", value=float(ctrl["bounds"][0][0]), step=0.05, format="%.2f", key="lab_lo",
-                             help="0 = sin ventas en corto. Negativo = se permiten cortos hasta ese límite.")
+                             help="Lo **menos** que puede tener cada empresa. 0 = puede quedar en cero.")
         hi = c4.number_input("Peso máximo por activo", value=float(ctrl["bounds"][0][1]), step=0.05, format="%.2f", key="lab_hi",
-                             help="Límite de concentración por activo. Mayor que 1 = se permite apalancamiento en ese activo.")
+                             help="Lo **más** que puede tener cada empresa. 1 = hasta el 100 %; 0,25 = máximo 25 %.")
         unlimited = st.toggle("Sin límites de peso (cortos y apalancamiento ilimitados)", value=False, key="lab_unlimited",
-                              help="Elimina las cotas: el máximo rendimiento deja de tener techo y la frontera necesita un tope.")
+                              help="Quita los límites de arriba: permite apostar en contra de una empresa o pedir prestado. Solo para comparar con la teoría.")
         max_target_ea = None
         if unlimited or lo < 0:
             max_target_ea = st.number_input(
@@ -1449,80 +1560,11 @@ solo cambia cuando la política del equipo lo indica.
                 format="%.4f", key="lab_max_target",
                 help="Con cortos el rendimiento esperado puede crecer sin fin; la frontera se dibuja hasta este valor. "
                      "0 = no dibujar más allá de lo que las cotas permitan.")
-        _explain("¿Qué significa cada supuesto y qué debo poner?", """
-Estas cuatro casillas son **las reglas del inversionista**. La app no las calcula a partir de los precios: las define el
-equipo según su mandato. Los números que aparecen al abrir son los del **caso docente de control** (rf = 3 %, γ = 5,
-pesos entre 0 y 1): sirven para reproducir el ejercicio del profesor, no son una recomendación.
-
-**1. Tasa libre de riesgo (efectiva anual)** — ejemplo en pantalla: `0.0300` = **3 % al año**
-- Qué es: lo que gana un inversionista sin asumir riesgo de impago, en la **misma moneda** de los activos.
-- Dónde se busca: si los activos están en USD, la tasa de un bono del Tesoro de EE. UU. de corto plazo (pestaña
-  Tasas soberanas o FRED); si trabajan en COP, un TES de corto plazo.
-- Cómo se escribe: en decimal y efectiva anual (4 % → `0.04`). La app la convierte a la frecuencia de los datos.
-- Para qué se usa: Sharpe, cartera tangente (máximo Sharpe), CAL y CAPM.
-
-**2. γ aversión al riesgo** — ejemplo en pantalla: `5.00`
-- Qué es: cuánto le molesta el riesgo al inversionista. Entra en la utilidad U = rendimiento − (γ/2)·varianza.
-- Cómo leerlo: γ bajo (≈ 2) = tolera riesgo y busca más rendimiento; γ alto (≈ 10) = muy conservador.
-- Para qué se usa: el **óptimo personal** (Markowitz), Black-Litterman y el rebalanceo.
-
-**3. Peso mínimo por activo** — ejemplo en pantalla: `0.00`
-- `0` = **no se permiten ventas en corto**: ningún activo puede tener peso negativo.
-- Un número negativo (por ejemplo `-0.20`) permite vender en corto hasta un 20 % en cada activo.
-- Un número positivo (por ejemplo `0.05`) obliga a tener al menos 5 % en **cada** activo.
-
-**4. Peso máximo por activo** — ejemplo en pantalla: `1.00`
-- `1` = un activo puede llegar a ser el 100 % de la cartera (sin límite de concentración).
-- `0.25` = ningún activo puede pesar más de 25 % (obliga a diversificar).
-- Mayor que `1` = permite apalancarse en ese activo.
-
-**Cuidado con combinaciones imposibles:** los pesos siempre suman 100 %. Si mínimo × número de activos > 1, o
-máximo × número de activos < 1, no existe ninguna cartera posible (por ejemplo, 3 activos con máximo 0,25 solo suman
-75 %) y la app lo avisa como **inviable**.
-
-**Sin límites de peso:** quita el mínimo y el máximo (cortos y apalancamiento ilimitados). Sirve para comparar con la
-teoría de Markowitz sin restricciones. Como el rendimiento puede crecer sin fin, aparece una casilla extra con el
-**rendimiento objetivo máximo** hasta donde se dibuja la frontera.
-
-**Cómo decidirlo en el equipo:** escriban primero el mandato (moneda, horizonte, cuánto pueden perder, si se permiten
-cortos y cuánto puede pesar un activo) y traduzcan cada regla a estas casillas.
-""")
+        _explain("¿Qué significa cada regla y qué pongo?", AYUDA["supuestos"])
         with st.expander("Cotas por activo y topes por sector (opcional)"):
             st.caption("Por defecto todos los activos usan el mínimo y máximo de arriba. Aquí se pueden cambiar por activo y "
                        "agrupar activos en sectores con un peso máximo por sector (decisión del equipo).")
-            _explain("¿Qué pongo en esta tabla?", """
-Esta tabla es **opcional**. Si no la tocan, todos los activos usan el peso mínimo y máximo de arriba y no hay topes
-por sector. Úsenla solo si el mandato tiene una regla especial para algún activo o grupo de activos.
-
-**Columnas**
-- **activo:** el nombre del activo (no se edita).
-- **mínimo:** el peso más bajo que puede tener **ese** activo. `0` = puede quedar fuera de la cartera; `0.10` = debe
-  tener al menos 10 %; negativo = se permite venderlo en corto hasta ese nivel.
-- **máximo:** el peso más alto que puede tener **ese** activo. `1` = sin límite; `0.30` = como mucho 30 %.
-- **sector:** una etiqueta libre para agrupar activos (por ejemplo `tecnología`, `energía`, `bonos`). Los activos con
-  la misma palabra quedan en el mismo grupo. Vacío = el activo no pertenece a ningún grupo.
-
-**Topes por sector:** en cuanto escriban al menos un sector, aparece debajo una segunda tabla con un **peso máximo** por
-sector. Ese número limita la **suma** de los pesos de todos los activos de ese sector. `1` = sin tope.
-
-**Ejemplo (solo para entender, no es una recomendación):** con 4 activos AAPL, MSFT, XOM y KO, si el mandato dice
-"ningún activo más de 40 % y tecnología como mucho 50 %":
-| activo | mínimo | máximo | sector |
-|---|---|---|---|
-| AAPL | 0 | 0.40 | tecnología |
-| MSFT | 0 | 0.40 | tecnología |
-| XOM | 0 | 0.40 | energía |
-| KO | 0 | 0.40 | consumo |
-
-y en la segunda tabla: tecnología = `0.50` (energía y consumo se dejan en `1`). Así AAPL + MSFT nunca superan 50 %.
-
-**Cómo comprobar que funcionó:** en la pestaña *Markowitz y fronteras*, los pesos de las carteras respetan estos
-límites. Si los límites no dejan sumar 100 % (por ejemplo, todos los máximos suman menos de 1), la app avisa que el
-problema es inviable.
-
-En el **caso docente de control** (activos A y B) no hay reglas especiales: se deja la tabla como está (0 y 1, sin
-sector).
-""")
+            _explain("¿Qué pongo en esta tabla?", AYUDA["cotas"])
             assets = list(lab.mu.index)
             per_asset = st.data_editor(
                 pd.DataFrame({"activo": assets, "mínimo": [lo] * len(assets), "máximo": [hi] * len(assets), "sector": [""] * len(assets)}),
@@ -1559,6 +1601,10 @@ sector).
     with tabs[5]:
         _tab_backtest(lab, rf_ea, gamma, bounds, groups)
     with tabs[6]:
-        _tab_capm(lab)
+        _tab_capm(lab, results, rf_ea)
     with tabs[7]:
+        sector_map = {a: str(sec).strip() for a, sec in zip(per_asset["activo"], per_asset["sector"])
+                      if str(sec).strip() and str(sec) != "nan"}
+        _tab_factsheet(lab, results, rf_ea, gamma, bounds, groups, sector_map, unlimited)
+    with tabs[8]:
         _tab_export(lab, rf_ea, gamma, bounds, groups, results)

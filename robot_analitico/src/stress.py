@@ -100,3 +100,21 @@ def concentration(weights: pd.Series) -> Concentration:
     hhi = float((w ** 2).sum())
     return Concentration(hhi=hhi, effective_n=1 / hhi if hhi > 0 else float("nan"),
                          max_weight=float(w.abs().max()), max_asset=str(w.abs().idxmax()))
+
+
+def parametric_es(mean_period: float, vol_period: float, confidence: float, horizon: int = 1) -> float:
+    """
+    Pérdida esperada (ES) normal de una cartera: pérdida promedio cuando se supera el VaR.
+    ES = −(μ·H) + σ·√H · φ(z)/(1 − c), con z = Φ⁻¹(1 − c). Positivo = pérdida.
+    """
+    tail = 1.0 - confidence
+    z = norm.ppf(tail)
+    return float(-(mean_period * horizon) + vol_period * np.sqrt(horizon) * norm.pdf(z) / tail)
+
+
+def historical_es(portfolio_returns: pd.Series, confidence: float) -> float:
+    """ES histórica: promedio de las pérdidas iguales o peores que el VaR histórico."""
+    r = portfolio_returns.dropna()
+    var = historical_var(r, confidence)
+    tail = r[-r >= var]
+    return float(-tail.mean()) if len(tail) else float("nan")
