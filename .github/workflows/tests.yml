@@ -1,0 +1,30 @@
+# Pruebas automáticas del bot (guía final, sección 7: tests/ + CI).
+# Corre la suite completa (v1 + v2, sin red) con las versiones exactas de requirements-lock.txt
+# y verifica que el paquete docente no se haya modificado.
+name: Pruebas
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: robot_analitico
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: robot_analitico/requirements-lock.txt
+      - name: Instalar dependencias fijadas
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-lock.txt
+      - name: Verificar el paquete docente
+        run: python scripts/verify_package.py
+      - name: Pruebas
+        run: python -m pytest tests/ -q

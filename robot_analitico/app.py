@@ -41,6 +41,8 @@ from src.comparison import (
 from src.data import FREQUENCY_RULES, fetch_asset_data, fetch_fx_to_usd, fetch_many, resample_prices
 from src.market import fetch_quotes
 from src.connectivity import run_checks
+from src.trace import git_commit
+from src.risk_extras import expected_shortfall_fraction
 from src.rates import fetch_bond_series, list_long_term_yield_countries, ping_fred, search_bond_series
 from laboratorio_v2 import render_portfolio_lab
 from src.news_links import verify_items
@@ -89,8 +91,8 @@ MEMBERS = [
     "Pedro Velez Uribe",
     "Tomás Giraldo Gomez",
 ]
-VERSION = "0.1.0"
-LAST_UPDATE = "2026-09-14"
+VERSION = "2.0.0"
+LAST_UPDATE = "2026-11-06"
 
 EXECUTION_POLICY_SUMMARY = (
     "Piloto académico restringido. Preselección (v1): posición larga únicamente, "
@@ -758,9 +760,14 @@ def render_forecast() -> None:
 
         st.markdown(f"**VaR paramétrico individual ({confidence_label}, RF-16)**")
         var_result = compute_var(model, p0, horizon, confidence, capital)
-        col_v1, col_v2 = st.columns(2)
+        es_fraction = expected_shortfall_fraction(model, horizon, confidence)
+        col_v1, col_v2, col_v3, col_v4 = st.columns(4)
         col_v1.metric(f"VaR fraccional ({confidence_label})", f"{var_result.var_fraction:.4%}")
         col_v2.metric("VaR en unidades monetarias", f"{var_result.var_dollar:,.2f}")
+        col_v3.metric(f"Pérdida esperada ES ({confidence_label})", f"{es_fraction:.4%}",
+                      help="Expected Shortfall: pérdida promedio en los casos en que se supera el VaR, con el mismo "
+                           "modelo y horizonte. Siempre es mayor o igual que el VaR.")
+        col_v4.metric("ES en unidades monetarias", f"{es_fraction * capital:,.2f}")
 
         st.divider()
         st.markdown(f"**Entrada, stop-loss y take-profit (p_L={params.p_l:.0%}, p_U={params.p_u:.0%}, RF-17)**")
@@ -1421,6 +1428,7 @@ def render_portfolio_forecast() -> None:
             p_l=DEFAULT_PL, p_u=DEFAULT_PU, br_min=pf_br_min, c_b=pf_c_b, c_s=pf_c_s,
         )
 
+        board_rows = []  # tablero de señales: una fila por activo y modelo
         with st.spinner(f"Descargando y pronosticando {len(entries)} activo(s)..."):
             for entry_idx, (ticker, amount) in enumerate(entries):
                 asset = fetch_asset_data(ticker, pf_start, pf_end)
@@ -1460,6 +1468,7 @@ def render_portfolio_forecast() -> None:
                     value_q95 = amount * (dist.q95_price / p0)
 
                     var_result = compute_var(model, p0, horizon, pf_confidence, amount)
+                    es_fraction = expected_shortfall_fraction(model, horizon, pf_confidence)
                     wf = walk_forward_validate(returns, fit_fn, model_label, horizon, periods_per_year)
                     signal = evaluate_signal(model, p0, horizon, risk_params)
                     probs = terminal_probabilities(model, p0, horizon, signal.p_be)
@@ -1496,6 +1505,14 @@ def render_portfolio_forecast() -> None:
                         )
                     else:
                         signal_texto = "❌ No hay señal sustentada: " + "; ".join(signal.reasons)
+                    board_rows.append({
+                        "activo": ticker, "modelo": model_label, "último dato": str(last_date.date()), "P0": p0,
+                        "entrada": signal.entry, "stop-loss": signal.sl_h, "take-profit": signal.tp_h,
+                        "equilibrio (P_BE)": signal.p_be, "BR_neto": signal.br_neto,
+                        f"VaR {pf_confidence_label}": var_result.var_fraction, f"ES {pf_confidence_label}": es_fraction,
+                        "señal": "sustentada" if signal.ok else "no hay señal",
+                        "motivo": "" if signal.ok else "; ".join(signal.reasons),
+                    })
 
                     with st.expander(f"Modelo: {model_label}{suficiencia_nota}"):
                         st.markdown(
@@ -1507,6 +1524,8 @@ def render_portfolio_forecast() -> None:
                             f"- VaR ({pf_confidence_label}): pérdida máxima esperada de "
                             f"${var_result.var_dollar:,.2f} ({var_result.var_fraction:.1%} "
                             "del monto invertido)\n"
+                            f"- Pérdida esperada (ES, {pf_confidence_label}): ${es_fraction * amount:,.2f} "
+                            f"({es_fraction:.1%}), pérdida promedio cuando se supera el VaR\n"
                             f"- Validación histórica (walk-forward): {wf_texto}\n"
                             f"- {signal_texto}\n"
                             f"- Probabilidad de ganar/perder frente al punto de equilibrio "
@@ -1521,6 +1540,23 @@ def render_portfolio_forecast() -> None:
                         )
 
                 st.divider()
+
+        if board_rows:
+            st.markdown("### Tablero de señales de la canasta")
+            board = pd.DataFrame(board_rows)
+            st.dataframe(board.style.format(
+                {c: "{:,.4f}" for c in ["P0", "entrada", "stop-loss", "take-profit", "equilibrio (P_BE)"]}
+                | {"BR_neto": "{:.2f}", f"VaR {pf_confidence_label}": "{:.2%}", f"ES {pf_confidence_label}": "{:.2%}"},
+                na_rep="—"), hide_index=True)
+            st.caption(
+                f"Construcción: para cada activo y modelo, entrada E = P0 (último cierre); stop-loss y take-profit son los "
+                f"cuantiles p_L = {DEFAULT_PL:.0%} y p_U = {DEFAULT_PU:.0%} del precio a H = {horizon} periodos; P_BE incluye "
+                f"los costos c_b = {pf_c_b} y c_s = {pf_c_s}. Hay señal solo si SL < E < TP, el beneficio y el riesgo netos "
+                f"son positivos y BR_neto ≥ {pf_br_min}. Límites: modelos homocedásticos con datos históricos; posición "
+                "larga únicamente; el bot **no ejecuta órdenes** ni recomienda operar."
+            )
+            st.download_button("Descargar tablero (CSV)", board.to_csv(index=False).encode("utf-8"),
+                               file_name="tablero_senales.csv", mime="text/csv", key="pf_board_csv")
 
 NEWS_CACHE_TTL_SECONDS = 1800  # 30 min: evita repetir llamadas externas en cada interacción
 # Alpha Vantage gratuito permite ~25 consultas/día: su caché dura más.
@@ -2059,8 +2095,10 @@ def render_home(user_name: str, user_email: str) -> None:
         st.info(EXECUTION_POLICY_SUMMARY)
     with st.expander("Comprobar conexiones reales (evidencia de la prueba P2-3)"):
         render_connection_check()
+    commit = git_commit()
     st.caption(
-        f"Sesión iniciada como {user_name} ({user_email}) · última actualización {LAST_UPDATE}"
+        f"Versión {VERSION} · commit `{commit[:7] if commit and commit != 'no disponible' else 'N/D'}` · "
+        f"última actualización {LAST_UPDATE} · sesión iniciada como {user_name} ({user_email})"
     )
     if not DEV_MODE and st.button("Cerrar sesión"):
         st.logout()

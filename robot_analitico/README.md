@@ -33,6 +33,11 @@ cotización en línea con la antigüedad del dato. Sigue sin ser una
 recomendación de inversión y la ejecución es solo simulada. El paquete
 docente está en `paquete_v2/` (no se modifica; ver su `MANIFIESTO_SHA256.json`).
 
+**Versión final 2.0.0 (guía de sustentación):** agrega pérdida esperada (ES) junto al VaR, tablero de señales de la
+canasta, moneda base USD/COP, riesgo sistemático y no sistemático (R²), rendimiento requerido por CAPM y SML con
+activos y carteras, desempeño frente al benchmark (Sharpe, Treynor, alfa de Jensen, razón de información) y la ficha
+técnica de las carteras con la estructura del Anexo 6 de la Superintendencia Financiera (simulación académica).
+
 El nombre visual del bot en la interfaz es **DPST**; el nombre oficial del
 entregable sigue siendo el del título de este README.
 
@@ -59,21 +64,46 @@ qué preguntas del banco la sustentan)._
   verde); la ampliación v2 se desarrolla en ramas de trabajo y se integra a
   `main` por pull request.
 
-## Ejecución local
+## Entrega final (guía de sustentación, sección 7)
+
+| Pide la guía | Dónde está |
+|---|---|
+| Enlace del bot en línea, versión que se sustenta (tag o commit) | Streamlit Cloud (rama `main`); Inicio muestra versión y commit. Etiqueta sugerida: `v2.0.0` |
+| Acceso para el docente | Modo desarrollo con nombre/correo simulados (sin contraseñas); ninguna clave está en el repositorio |
+| README e instalación paso a paso | Esta sección y la siguiente |
+| `requirements.txt` y dependencias fijadas | `requirements.txt` (rangos, lo usa Streamlit Cloud) y `requirements-lock.txt` (versiones exactas probadas) |
+| `.env.example` sin secretos | `.env.example` y `.streamlit/secrets.toml.example` |
+| `tests/` + CI | `tests/` (v1 + v2, sin red) y `.github/workflows/tests.yml` (GitHub Actions) |
+| `CHANGELOG.md` | `CHANGELOG.md` |
+| `docs/` supuestos y límites | `docs/SUPUESTOS_Y_LIMITES.md` |
+| `data/` + procedencia y registros de respaldo | `data/PROCEDENCIA.md`; traza + snapshot exportables (módulo Exportar) |
+| Presentación y anexos | `docs/FICHA_PRODUCTO.md`, `docs/MATRIZ_EVOLUCION.md`, anexo `docs/anexos/calculos_contrastables.ipynb` |
+| `CONTRIBUTIONS.md`, `AI_USAGE.md` | En la raíz de `robot_analitico/` |
+| Aviso académico | Disclaimer al entrar, en Inicio y al final de este README |
+
+## Ejecución local (paso a paso)
 
 ```bash
-# 1. Crear y activar entorno virtual (una sola vez)
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
+# 0. Clonar y entrar a la carpeta del proyecto
+git clone https://github.com/Chino886/RobotChechoTeoriadePortafolio.git
+cd RobotChechoTeoriadePortafolio/robot_analitico
 
-# 2. Instalar dependencias
-pip install -r requirements.txt
+# 1. Crear y activar entorno virtual (Python 3.11 o superior; probado con 3.13)
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
-# 3. Configurar credenciales OIDC (ver .streamlit/secrets.toml.example)
+# 2. Instalar las dependencias fijadas (las mismas con las que pasan las pruebas)
+pip install -r requirements-lock.txt
+
+# 3. Claves opcionales (tasas FRED y noticias Alpha Vantage). Sin ellas la app funciona
+#    y esas secciones lo avisan. Nunca suban secrets.toml.
 cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-# Editar .streamlit/secrets.toml con las credenciales reales del curso
 
-# 4. Correr la app
+# 4. Verificar el paquete docente y correr las pruebas
+python scripts/verify_package.py
+python -m pytest tests/ -q
+
+# 5. Correr la app
 streamlit run app.py
 ```
 
@@ -141,6 +171,14 @@ src/trace.py # v2: traza de ejecución y verificación de la exportación
 src/rates.py # tasas de bonos del gobierno por país (FRED: OCDE a 10 años, FMI y búsqueda por nombre)
 src/news_links.py # verificación de enlaces de noticias
 src/connectivity.py # comprobación de conexiones reales (evidencia P2-3)
+src/risk_extras.py # pérdida esperada (ES) del modelo lognormal de la v1
+src/performance.py # Sharpe, Treynor, alfa de Jensen, error de seguimiento, razón de información, CAPM
+src/factsheet.py # ficha técnica con la estructura del Anexo 6 de la SFC (simulación)
+docs/ # supuestos y límites, ficha del producto, matriz de evolución, anexo con cálculos contrastables
+data/PROCEDENCIA.md # procedencia de los datos de ejemplo y de las fuentes en vivo
+.env.example, .streamlit/secrets.toml.example # nombres de las claves, sin valores reales
+CHANGELOG.md # historial de versiones
+../.github/workflows/tests.yml # CI: pruebas en cada push y pull request
 decisiones/ # hojas que llena el equipo: mandato, cálculo a mano, reproducción P2-36, copias de plantillas
 scripts/verify_package.py # comprueba paquete_v2/ contra su manifiesto SHA256
 requirements-lock.txt # versiones exactas con las que se ejecutaron las pruebas

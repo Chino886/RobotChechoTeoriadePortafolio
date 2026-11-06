@@ -43,6 +43,8 @@ from src.data_quality import (
     last_bar_age,
 )
 from src.estimators import ewma_covariance, ledoit_wolf
+from src.factsheet import NOT_APPLICABLE, build_factsheet, to_markdown
+from src.performance import capm_required_return, historical_erp, performance_table
 from src.market import fetch_quotes, format_age
 from src.portfolio import (
     correlation_matrix,
@@ -70,9 +72,11 @@ from src.rebalance import ACTION_REBALANCE, Book, RebalancePolicy, plan_rebalanc
 from src.stress import (
     concentration,
     correlation_breakdown,
+    historical_es,
     historical_var,
     individual_shocks,
     joint_worst_historical,
+    parametric_es,
     parametric_var,
     reverse_stress,
     worst_historical_portfolio_period,
@@ -85,6 +89,10 @@ PAQUETE_DATA = Path(__file__).parent / "paquete_v2" / "data"
 SOURCE_TWO = "Caso docente de dos activos (control)"
 SOURCE_SYNTH = "Laboratorio sintético: 20 series del paquete"
 SOURCE_MARKET = "Mercado: activos de la Comparación (Yahoo Finance)"
+# Identidad para la ficha técnica (la misma de app.py).
+BRAND = "DPST"
+TEAM = "Equipo DPST"
+INSTITUTION = "Tech Business School – Universidad EIA"
 
 LAYOUT = dict(margin=dict(t=50, b=40, l=40, r=20), **DARK_LAYOUT)
 
@@ -221,7 +229,7 @@ INDICATORS_HELP = """
 LAB_NAV_CSS = """
 <style>
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] {
-    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.7rem;
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.7rem;
     border: none; box-shadow: none; margin-bottom: 1rem; overflow: visible;
 }
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"] {
@@ -470,6 +478,10 @@ def _tab_risk(lab: LabData):
         st.caption(f"VaR histórico 95 % / 99 % (1 periodo): {_pct(historical_var(rp_hist, 0.95))} / "
                    f"{_pct(historical_var(rp_hist, 0.99))} · VaR paramétrico 99 %: "
                    f"{_pct(parametric_var(stats.mean, stats.volatility, 0.99))}.")
+        st.caption(f"Pérdida esperada (ES, promedio de las pérdidas peores que el VaR) 95 %: histórica "
+                   f"{_pct(historical_es(rp_hist, 0.95))}, paramétrica {_pct(parametric_es(stats.mean, stats.volatility, 0.95))} · "
+                   f"99 %: histórica {_pct(historical_es(rp_hist, 0.99))}, paramétrica "
+                   f"{_pct(parametric_es(stats.mean, stats.volatility, 0.99))}.")
 
     if lab.returns is not None and len(lab.returns) > 30:
         window = st.slider("Ventana móvil (observaciones)", 10, min(250, len(lab.returns) - 1), min(60, len(lab.returns) // 3),
@@ -1195,7 +1207,101 @@ def _benchmark_returns(lab: LabData, bench: str) -> "pd.Series | None":
     return prices["adjusted_close"].pct_change(fill_method=None)
 
 
-def _market_betas(lab: LabData, results):
+PORTFOLIO_NAMES = {"gmv": "Mínima varianza (GMV)", "tangent": "Tangente (máximo Sharpe)", "personal": "Óptimo personal",
+                   "top": "Máximo rendimiento esperado"}
+
+
+def _portfolio_series(lab: LabData, results) -> "dict[str, pd.Series]":
+    """Rendimientos históricos (pesos constantes) de cada cartera óptima válida y de 1/N."""
+    out = {}
+    for key, name in PORTFOLIO_NAMES.items():
+        res = (results or {}).get(key)
+        if res is not None and res.ok:
+            out[name] = portfolio_return_series(lab.returns, res.weights)
+    n = lab.returns.shape[1]
+    out["1/N (referencia simple)"] = portfolio_return_series(lab.returns, pd.Series(1.0 / n, index=lab.returns.columns))
+    return out
+
+
+def _capm_and_performance(lab: LabData, results, betas: pd.Series, mret: pd.Series, rf_ea: float, bench_name: str):
+    """Rendimiento requerido por CAPM (SML) por activo y cartera, y desempeño frente al benchmark."""
+    if betas.empty:
+        return
+    m = lab.m
+    rf_p = rf_per_period(rf_ea, m)
+    common = mret.reindex(lab.returns.index)
+    st.markdown("**Rendimiento requerido por CAPM y línea del mercado de títulos (SML)**")
+    erp_mode = st.radio("Prima de mercado (ERP) — decisión del equipo",
+                        ["Histórica del benchmark en esta ventana", "Escrita por el equipo"], horizontal=True,
+                        key="lab_capm_erp_mode")
+    if erp_mode == "Escrita por el equipo":
+        erp = st.number_input("ERP anual", value=0.0, step=0.005, format="%.4f", key="lab_capm_erp",
+                              help="Prima esperada del mercado sobre rf; el equipo la justifica (fuente, periodo, moneda).")
+    else:
+        erp = historical_erp(common, rf_p, m)
+        st.caption(f"ERP histórica de {bench_name} = (media de su rendimiento − rf del periodo) × {m} = **{erp:.2%}** anual "
+                   "en la misma muestra. Es una estimación del pasado, no una predicción.")
+    rows = []
+    for a, b in betas.items():
+        rows.append({"activo o cartera": a, "beta": b, "requerido CAPM": capm_required_return(rf_ea, b, erp),
+                     "esperado histórico (μ·m)": float(lab.mu[a] * m)})
+    port_betas = {}
+    for key, name in PORTFOLIO_NAMES.items():
+        res = (results or {}).get(key)
+        if res is None or not res.ok:
+            continue
+        try:
+            pb = portfolio_beta(res.weights, betas)
+        except ValueError:
+            continue
+        port_betas[name] = pb
+        rows.append({"activo o cartera": name, "beta": pb, "requerido CAPM": capm_required_return(rf_ea, pb, erp),
+                     "esperado histórico (μ·m)": float(res.weights @ lab.mu * m)})
+    capm_df = pd.DataFrame(rows)
+    capm_df["diferencia (esperado − requerido)"] = capm_df["esperado histórico (μ·m)"] - capm_df["requerido CAPM"]
+    st.dataframe(capm_df.style.format({c: "{:.2%}" for c in capm_df.columns if c not in ("activo o cartera", "beta")}
+                                      | {"beta": "{:.3f}"}), hide_index=True)
+    xs = np.linspace(min(0.0, capm_df["beta"].min() - 0.2), max(2.0, capm_df["beta"].max() + 0.2), 30)
+    fig = go.Figure(go.Scatter(x=xs, y=[capm_required_return(rf_ea, x, erp) for x in xs], name="SML", line=dict(color=ACCENT_GOLD)))
+    is_port = capm_df["activo o cartera"].isin(port_betas.keys())
+    fig.add_trace(go.Scatter(x=capm_df.loc[~is_port, "beta"], y=capm_df.loc[~is_port, "esperado histórico (μ·m)"],
+                             mode="markers+text", text=capm_df.loc[~is_port, "activo o cartera"], textposition="top center",
+                             name="activos (esperado histórico)", marker=dict(size=9, color=ELECTRIC_BLUE)))
+    fig.add_trace(go.Scatter(x=capm_df.loc[is_port, "beta"], y=capm_df.loc[is_port, "esperado histórico (μ·m)"],
+                             mode="markers", name="carteras", marker=dict(size=12, symbol="star", color=STAR_WHITE),
+                             text=capm_df.loc[is_port, "activo o cartera"], hovertemplate="%{text}<extra></extra>"))
+    fig.update_layout(title=f"SML: rf = {rf_ea:.2%}, ERP = {erp:.2%}, proxy de mercado = {bench_name}",
+                      xaxis_title="Beta", yaxis_title="Rendimiento anual", yaxis_tickformat=".0%", height=380, **LAYOUT)
+    st.plotly_chart(fig)
+    st.caption(f"Declarado: proxy de mercado {bench_name}, rf = {rf_ea:.2%} EA (supuestos del laboratorio), ventana "
+               f"{lab.returns.index[0].date()} a {lab.returns.index[-1].date()}, frecuencia {lab.frequency}. Un punto sobre la SML "
+               "rindió en la muestra más de lo que su beta exige; no implica que lo siga haciendo.")
+
+    st.markdown(f"**Desempeño frente al benchmark {bench_name} (misma muestra y frecuencia)**")
+    table = performance_table(_portfolio_series(lab, results) | {f"Benchmark {bench_name}": common}, common, rf_p, m)
+    show = table.rename(columns={"n": "n", "ann_return": "rendimiento anual", "ann_vol": "volatilidad anual", "sharpe": "Sharpe",
+                                 "beta": "beta", "r_squared": "R²", "systematic_share": "riesgo sistemático",
+                                 "idiosyncratic_share": "riesgo no sistemático", "treynor": "Treynor",
+                                 "jensen_alpha": "alfa de Jensen", "tracking_error": "error de seguimiento",
+                                 "information_ratio": "razón de información"})
+    pct = ["rendimiento anual", "volatilidad anual", "riesgo sistemático", "riesgo no sistemático", "Treynor",
+           "alfa de Jensen", "error de seguimiento"]
+    st.dataframe(show.style.format({c: "{:.2%}" for c in pct if c in show} | {c: "{:.3f}" for c in
+                                   ("Sharpe", "beta", "R²", "razón de información") if c in show}, na_rep="—"))
+    _explain("¿Qué significa cada indicador de desempeño?", f"""
+- **Sharpe:** rendimiento sobre rf por unidad de volatilidad **total**.
+- **Treynor:** rendimiento sobre rf por unidad de **beta** (riesgo sistemático). Sirve para carteras ya diversificadas.
+- **Alfa de Jensen:** cuánto rindió por encima de lo que pedía el CAPM con su beta: R_p − [rf + β(R_m − rf)], anual.
+- **Error de seguimiento:** volatilidad de la diferencia de rendimientos con el benchmark.
+- **Razón de información:** diferencia promedio con el benchmark por unidad de error de seguimiento.
+- **Riesgo sistemático / no sistemático:** R² y 1 − R² de la regresión contra {bench_name}.
+
+**Advertencia:** las carteras óptimas se estimaron con **esta misma muestra**, así que su desempeño aquí es optimista
+(dentro de muestra). La prueba fuera de muestra está en el módulo **Backtest**. La referencia simple es **1/N**.
+""")
+
+
+def _market_betas(lab: LabData, results, rf_ea: float = 0.0):
     """Betas de los activos reales (OLS y Cov/Var), beta de cada cartera y Hamada sobre un activo."""
     st.markdown("#### Beta de los activos frente a un benchmark")
     bench = st.text_input("Ticker del benchmark (decisión del equipo; ej. ^GSPC, ^COLCAP)", value="", key="lab_beta_bench")
@@ -1212,16 +1318,23 @@ def _market_betas(lab: LabData, results):
         "alfa (por periodo)": {a: f.alpha for a, f in fits.items()},
         "EE": {a: f.std_error for a, f in fits.items()},
         "R²": {a: f.r_squared for a, f in fits.items()},
+        "riesgo sistemático": {a: f.r_squared for a, f in fits.items()},
+        "riesgo no sistemático": {a: 1 - f.r_squared for a, f in fits.items()},
         "n": {a: f.n for a, f in fits.items()},
         "estado": {a: f.status for a, f in fits.items()},
     })
     table.index.name = "activo"
     st.dataframe(table.style.format({"beta (OLS)": "{:.4f}", "beta (Cov/Var)": "{:.4f}", "diferencia": "{:.1e}",
-                                     "alfa (por periodo)": "{:.6f}", "EE": "{:.3f}", "R²": "{:.2f}"}, na_rep="—"))
+                                     "alfa (por periodo)": "{:.6f}", "EE": "{:.3f}", "R²": "{:.2f}",
+                                     "riesgo sistemático": "{:.1%}", "riesgo no sistemático": "{:.1%}"}, na_rep="—"))
     st.caption(f"Beta frente a {bench.strip().upper()} en {lab.currency or 'la moneda de la Comparación'} (sensibilidad a esa "
                "referencia, no automáticamente al «mercado» teórico). La beta sale por dos caminos —pendiente de la regresión "
                "OLS y Cov(activo, benchmark)/Var(benchmark)— que deben coincidir (P2-31); la columna «diferencia» lo muestra. "
-               "rf = 0 en esta tabla porque se usa la misma muestra para todos.")
+               "rf = 0 en esta tabla porque se usa la misma muestra para todos. **Riesgo sistemático = R²**: parte de la "
+               "varianza del activo que explica el benchmark (β²σ²_m/σ²); el resto (1 − R²) es no sistemático y se puede "
+               "diversificar.")
+    st.session_state["lab_bench_returns"] = mret
+    st.session_state["lab_bench_name"] = bench.strip().upper()
 
     ok = {a: f.beta for a, f in fits.items() if f.status == "ok"}
     betas = pd.Series(ok, dtype=float)
@@ -1246,6 +1359,8 @@ def _market_betas(lab: LabData, results):
         st.caption("β_cartera = Σ wᵢ βᵢ (guía, sección 8; P102 y P104). Solo vale si todas las betas salen de la misma muestra, "
                    "el mismo benchmark y la misma convención de rendimientos, como en esta tabla; si se cambia alguno, hay "
                    "que recalcular todas.")
+
+    _capm_and_performance(lab, results, betas, mret, rf_ea, bench.strip().upper())
 
     st.markdown("**Hamada sobre un activo real: desapalancar y reapalancar**")
     if betas.empty:
@@ -1273,7 +1388,7 @@ def _market_betas(lab: LabData, results):
                "en 0 la beta no cambia.")
 
 
-def _tab_capm(lab: LabData, results=None):
+def _tab_capm(lab: LabData, results=None, rf_ea: float = 0.0):
     params = _load_json("caso_alimentos_parametros.json")
     r = pd.read_csv(PAQUETE_DATA / "caso_alimentos_retornos.csv").set_index("anio")
     st.markdown(f"#### Caso docente congelado: {params['empresa']}")
@@ -1409,7 +1524,7 @@ def _tab_capm(lab: LabData, results=None):
         (st.success if chk.consistent else st.warning)(chk.message)
 
     if lab.source == SOURCE_MARKET and lab.returns is not None:
-        _market_betas(lab, results)
+        _market_betas(lab, results, rf_ea)
 
     erp = params["erp_madura"]
     xs = np.linspace(0, 2, 20)
@@ -1461,6 +1576,93 @@ def _trace_context(lab: LabData) -> dict:
     if triggers:
         ctx["trigger_id"] = triggers[-1]
     return ctx
+
+
+def _constraints_text(bounds, groups, unlimited: bool, assets) -> str:
+    if unlimited:
+        return "Pesos sin límites (cortos y apalancamiento permitidos); suma de pesos = 100 %."
+    uniq = {tuple(b) for b in bounds}
+    text = (f"Cada activo entre {list(uniq)[0][0]:.0%} y {list(uniq)[0][1]:.0%}" if len(uniq) == 1
+            else "Cotas por activo: " + ", ".join(f"{a} [{b[0]:.0%}, {b[1]:.0%}]" for a, b in zip(assets, bounds)))
+    if groups:
+        text += "; topes por sector: " + ", ".join(f"{'+'.join(g)} ≤ {cap:.0%}" for g, cap in groups)
+    return text + "; suma de pesos = 100 %."
+
+
+def _tab_factsheet(lab: LabData, results, rf_ea, gamma, bounds, groups, sectors, unlimited):
+    st.markdown("#### Ficha técnica del portafolio")
+    st.caption("Estructura de la ficha técnica de los Fondos de Inversión Colectiva de la Superintendencia Financiera de "
+               "Colombia (Decreto 1242 de 2013; Circular Básica Jurídica, Anexo 6). Es una **simulación académica**: los "
+               "campos propios de un fondo real (valor del fondo, comisiones, calificación, custodio) se marcan «No aplica».")
+    if not results:
+        st.info("Abre el módulo «Markowitz y fronteras» para calcular las carteras.")
+        return
+    options = {"Tangente (máximo Sharpe)": ("tangent", f"Maximizar la razón de Sharpe con rf = {rf_ea:.2%} EA."),
+               "Mínimo riesgo (GMV)": ("gmv", "Minimizar la varianza de la cartera."),
+               "Mayor rendimiento esperado": ("top", "Maximizar el rendimiento esperado dentro de las restricciones."),
+               "Óptimo personal": ("personal", f"Maximizar U = μ − (γ/2)σ² con γ = {gamma:g}.")}
+    choice = st.selectbox("Cartera", list(options), key="lab_factsheet_choice")
+    key, objective = options[choice]
+    res = results.get(key)
+    if res is None or not res.ok:
+        st.warning(f"La cartera «{choice}» no tiene solución válida con estas restricciones ({getattr(res, 'status', 'N/D')}).")
+        return
+    m = lab.m
+    stats = portfolio_stats(res.weights, lab.mu, lab.sigma)
+    asset_ccy = None
+    result = st.session_state.get("comparison_result")
+    if lab.source == SOURCE_MARKET and result is not None:
+        asset_ccy = {sm.ticker: sm.currency for sm in getattr(result, "summaries", [])}
+    extra = [("Rendimiento esperado del modelo (μ·m)", _pct(stats.mean * m)),
+             ("Volatilidad esperada del modelo (σ·√m)", _pct(stats.volatility * np.sqrt(m)))]
+    bench = st.session_state.get("lab_bench_returns")
+    if bench is not None and lab.returns is not None:
+        b = beta_ols(portfolio_return_series(lab.returns, res.weights), bench.reindex(lab.returns.index))
+        if b.status == "ok":
+            extra.append((f"Beta frente a {st.session_state.get('lab_bench_name', 'benchmark')}", f"{b.beta:.3f}"))
+    fs = build_factsheet(f"Cartera {choice} — {BRAND}", res.weights, lab.returns, m, lab.currency, objective,
+                         _constraints_text(bounds, groups, unlimited, list(lab.mu.index)), rf_ea, TEAM, INSTITUTION,
+                         asset_currency=asset_ccy, sectors=sectors or None, extra_risk=extra)
+    def md_table(rows):  # tabla en Markdown: el texto largo se ajusta en vez de cortarse
+        return "| Campo | Valor |\n|---|---|\n" + "\n".join(f"| {k} | {v} |" for k, v in rows)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**1. Características**")
+        st.markdown(md_table(fs.general))
+    with c2:
+        st.markdown("**2. Política de inversión**")
+        st.markdown(md_table(fs.policy))
+    st.markdown("**3. Rentabilidad y volatilidad histórica** (efectiva anual por ventana)")
+    st.dataframe(fs.performance.T.apply(lambda col: col.map(lambda v: "N/D" if pd.isna(v) else f"{v:.2%}")))
+    if fs.performance.isna().all().all():
+        st.caption("N/D: esta fuente no tiene serie de precios con fechas (caso docente con parámetros dados).")
+    if fs.value_path is not None and len(fs.value_path) > 1:
+        fig = go.Figure(go.Scatter(x=fs.value_path.index, y=fs.value_path, line=dict(color=ACCENT_GOLD), name="valor"))
+        fig.update_layout(title=f"Evolución de 100.000 {lab.currency or ''} invertidos (pesos constantes, sin costos)",
+                          height=320, **LAYOUT)
+        st.plotly_chart(fig)
+    c1, c2, c3 = st.columns(3)
+    for col, series, title in ((c1, fs.composition_asset, "4. Composición por activo"),
+                               (c2, fs.composition_currency, "Por moneda de origen"),
+                               (c3, fs.composition_sector, "Por sector")):
+        with col:
+            st.markdown(f"**{title}**")
+            if series.empty:
+                st.caption("N/D" + (" — asignen sectores en «Cotas por activo y topes por sector»." if "sector" in title else ""))
+            else:
+                st.dataframe(series.rename("peso").to_frame().style.format("{:.2%}"))
+    st.markdown("**5. Principales inversiones** (hasta 10, por |peso|)")
+    st.dataframe(fs.top_holdings.rename("|peso|").to_frame().T.style.format("{:.2%}"))
+    st.markdown("**6. Riesgo**")
+    st.markdown(md_table(fs.risk))
+    with st.expander("7. Campos de la ficha oficial que no aplican a una simulación"):
+        for item in fs.not_applicable:
+            st.write(f"- {item}: {NOT_APPLICABLE}")
+    st.caption("Rentabilidades pasadas no garantizan rentabilidades futuras. No es asesoría financiera ni una oferta de "
+               "inversión, y el bot no ejecuta órdenes.")
+    st.download_button("Descargar ficha técnica (Markdown)", to_markdown(fs).encode("utf-8"),
+                       file_name=f"ficha_tecnica_{key}.md", mime="text/markdown", key="lab_factsheet_md")
 
 
 def _tab_export(lab: LabData, rf_ea, gamma, bounds, groups, results):
@@ -1681,7 +1883,7 @@ sector).
     st.caption("Elige un módulo; los supuestos de arriba aplican a todos.")
     with st.container(key="lab_nav"):
         tabs = st.tabs(["Riesgo conjunto", "Estrés y estimadores", "Markowitz y fronteras", "Black-Litterman",
-                        "Rebalanceo", "Backtest", "Beta, CAPM y valoración", "Exportar"])
+                        "Rebalanceo", "Backtest", "Beta, CAPM y valoración", "Ficha técnica", "Exportar"])
     results = None
     with tabs[0]:
         w_test = _tab_risk(lab)
@@ -1696,6 +1898,10 @@ sector).
     with tabs[5]:
         _tab_backtest(lab, rf_ea, gamma, bounds, groups)
     with tabs[6]:
-        _tab_capm(lab, results)
+        _tab_capm(lab, results, rf_ea)
     with tabs[7]:
+        sector_map = {a: str(sec).strip() for a, sec in zip(per_asset["activo"], per_asset["sector"])
+                      if str(sec).strip() and str(sec) != "nan"}
+        _tab_factsheet(lab, results, rf_ea, gamma, bounds, groups, sector_map, unlimited)
+    with tabs[8]:
         _tab_export(lab, rf_ea, gamma, bounds, groups, results)

@@ -68,3 +68,100 @@ def test_lab_cop_base_currency_betas_portfolio_betas_and_hamada(monkeypatch):
         assert at.number_input(key=key).value == 0.0  # vacíos: no se copian los del caso Alimentos
     hamada = [m for m in at.metric if "Beta" in m.label]
     assert hamada[0].value == hamada[1].value == hamada[2].value  # todo en 0: la beta no cambia
+
+
+def test_lab_performance_capm_and_factsheet(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    comparison, remote = _market()
+    monkeypatch.setattr(laboratorio_v2, "fetch_asset_data", lambda t, s, e: remote[t])
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=180)
+    at.session_state["intro_ack"] = True
+    at.session_state["terms_accepted"] = True
+    at.session_state["comparison_result"] = comparison
+    at.run()
+    at.radio(key="lab_source").set_value(laboratorio_v2.SOURCE_MARKET).run()
+    at.text_input(key="lab_beta_bench").input("^GSPC").run()
+    assert not at.exception
+    frames = [d.value for d in at.dataframe]
+
+    def frame_with(col):
+        return next(f for f in frames if col in getattr(f, "columns", []))
+
+    betas = frame_with("riesgo sistemático")
+    np.testing.assert_allclose(betas["riesgo sistemático"] + betas["riesgo no sistemático"], 1.0)
+    capm = frame_with("requerido CAPM")
+    assert {"AAA", "BBB", "CCC", "Tangente (máximo Sharpe)"} <= set(capm["activo o cartera"])
+    perf = frame_with("alfa de Jensen")
+    assert {"Sharpe", "Treynor", "razón de información", "error de seguimiento"} <= set(perf.columns)
+    assert "1/N (referencia simple)" in perf.index and "Benchmark ^GSPC" in perf.index
+    assert perf.loc["Benchmark ^GSPC", "beta"] == 1.0 or abs(perf.loc["Benchmark ^GSPC", "beta"] - 1.0) < 1e-9
+
+    # Ficha técnica (estructura de la Superfinanciera) de la tangente, con rentabilidad por ventanas.
+    assert at.selectbox(key="lab_factsheet_choice").value == "Tangente (máximo Sharpe)"
+    windows = next(f for f in frames if "Último año" in getattr(f, "columns", []))
+    assert {"Último mes", "Últimos 6 meses", "Año corrido", "Últimos 3 años"} <= set(windows.columns)
+    assert any("Superintendencia Financiera" in c.value for c in at.caption)
+    for choice in ("Mínimo riesgo (GMV)", "Mayor rendimiento esperado"):
+        at.selectbox(key="lab_factsheet_choice").set_value(choice).run()
+        assert not at.exception
+
+
+def test_factsheet_with_teaching_case_has_no_history():
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=180)
+    at.session_state["intro_ack"] = True
+    at.session_state["terms_accepted"] = True
+    at.run()
+    assert not at.exception
+    assert at.selectbox(key="lab_factsheet_choice").value == "Tangente (máximo Sharpe)"
+    assert any("| Fecha de corte | N/D" in md.value for md in at.markdown)
+    assert any("N/D: esta fuente no tiene serie de precios" in c.value for c in at.caption)
+
+
+def test_basket_signal_board_and_expected_shortfall(monkeypatch):
+    """Canasta: tablero de señales con entrada, stop-loss, take-profit, VaR y ES por activo y modelo."""
+    import src.data
+    from streamlit.testing.v1 import AppTest
+
+    idx = pd.bdate_range("2023-01-02", periods=700)
+
+    def fake(ticker, start, end):
+        rng = np.random.default_rng(abs(hash(ticker)) % 1000)
+        p = 50 * np.cumprod(1 + rng.normal(0.0006, 0.012, len(idx)))
+        return AssetData(ticker, True, pd.DataFrame({"adjusted_close": p}, index=idx), currency="USD")
+
+    monkeypatch.setattr(src.data, "fetch_asset_data", fake)
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
+    at.session_state["intro_ack"] = True
+    at.session_state["terms_accepted"] = True
+    at.run()
+    next(b for b in at.button if b.label == "Pronosticar canasta").click().run()
+    assert not at.exception
+    board = next(d.value for d in at.dataframe if "stop-loss" in getattr(d.value, "columns", []))
+    assert {"entrada", "take-profit", "equilibrio (P_BE)", "señal", "motivo"} <= set(board.columns)
+    es_col = next(c for c in board.columns if c.startswith("ES "))
+    var_col = next(c for c in board.columns if c.startswith("VaR "))
+    assert (board[es_col] >= board[var_col] - 1e-12).all()
+    assert any("no ejecuta órdenes" in c.value for c in at.caption)
+
+
+def test_single_asset_risk_shows_expected_shortfall(monkeypatch):
+    import src.data
+    from streamlit.testing.v1 import AppTest
+
+    idx = pd.bdate_range("2021-01-04", periods=1200)
+    p = 100 * np.cumprod(1 + np.random.default_rng(9).normal(0.0004, 0.015, len(idx)))
+    monkeypatch.setattr(src.data, "fetch_asset_data",
+                        lambda t, s, e: AssetData(t, True, pd.DataFrame({"adjusted_close": p}, index=idx), currency="USD"))
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=300)
+    at.session_state["intro_ack"] = True
+    at.session_state["terms_accepted"] = True
+    at.run()
+    next(b for b in at.button if b.label == "Descargar y limpiar").click().run()
+    assert not at.exception
+    labels = {m.label: m.value for m in at.metric}
+    es = next(v for k, v in labels.items() if k.startswith("Pérdida esperada ES"))
+    var = next(v for k, v in labels.items() if k.startswith("VaR fraccional"))
+    assert float(es.rstrip("%")) >= float(var.rstrip("%"))
