@@ -177,6 +177,10 @@ INDICATORS_HELP = """
 
 # Pestañas del laboratorio como botones en cuadrícula con borde verde. Apunta a clases
 # internas de Streamlit (st-key-*, data-testid) y puede requerir ajuste si cambia la versión.
+# Módulos del laboratorio (pestañas). También alimentan el buscador Ctrl/⌘ + K de app.py.
+LAB_MODULES = ["Riesgo conjunto", "Estrés y estimadores", "Markowitz y fronteras", "Black-Litterman",
+               "Rebalanceo", "Backtest", "Beta, CAPM y valoración", "Exportar"]
+
 LAB_NAV_CSS = """
 <style>
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] {
@@ -1540,8 +1544,7 @@ sector).
     st.markdown("#### Módulos del laboratorio")
     st.caption("Elige un módulo; los supuestos de arriba aplican a todos.")
     with st.container(key="lab_nav"):
-        tabs = st.tabs(["Riesgo conjunto", "Estrés y estimadores", "Markowitz y fronteras", "Black-Litterman",
-                        "Rebalanceo", "Backtest", "Beta, CAPM y valoración", "Exportar"])
+        tabs = st.tabs(LAB_MODULES)
     results = None
     with tabs[0]:
         w_test = _tab_risk(lab)

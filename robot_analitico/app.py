@@ -42,7 +42,8 @@ from src.data import FREQUENCY_RULES, fetch_asset_data, fetch_fx_to_usd, fetch_m
 from src.market import fetch_quotes
 from src.connectivity import run_checks
 from src.rates import fetch_bond_series, list_long_term_yield_countries, ping_fred, search_bond_series
-from laboratorio_v2 import render_portfolio_lab
+from laboratorio_v2 import LAB_MODULES, render_portfolio_lab
+from src.ui_fx import apply_ui_fx
 from src.news_links import verify_items
 from src.forecasting import (
     FORECAST_MODELS,
@@ -2090,6 +2091,7 @@ def main() -> None:
 
     render_header()
     render_sidebar_style()
+    apply_ui_fx(_command_items())
 
     if DEV_MODE:
         st.sidebar.warning("MODO DESARROLLO: login OIDC desactivado temporalmente.")
@@ -2131,6 +2133,20 @@ def main() -> None:
             _page_title(LAB_TITLE,
                         "Carteras simuladas con los modelos del avance 2.")
             render_portfolio_lab()
+
+
+def _command_items() -> "list[dict]":
+    """Entradas del buscador Ctrl/⌘ + K: secciones del menú superior y módulos del laboratorio."""
+    sections = [
+        ("Inicio", "Portada, alcance y conexiones"),
+        ("Preselección de activos", "Un activo, pronóstico y comparación"),
+        ("Tasas soberanas", "Bonos del gobierno por país (FRED)"),
+        (LAB_TITLE, "Carteras simuladas del avance 2"),
+    ]
+    items = [{"group": "Secciones", "label": name, "top": name, "hint": hint} for name, hint in sections]
+    items += [{"group": LAB_TITLE, "label": module, "top": LAB_TITLE, "sub": module, "hint": "Módulo"}
+              for module in LAB_MODULES]
+    return items
 
 
 def _page_title(title: str, subtitle: str) -> None:
