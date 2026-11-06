@@ -165,6 +165,38 @@ button:focus-visible, [role="tab"]:focus-visible, a:focus-visible {
 /* Casillas y radios con transición. */
 [data-baseweb="checkbox"] span, [data-baseweb="radio"] div { transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s; }
 
+/* Guía de Apple: respuesta al presionar (pointer-down), no al soltar. Los botones principales
+   la reciben desde el resorte del JS, que también maneja su efecto magnético. */
+[data-testid="stBaseButton-secondary"]:active, [data-testid="stBaseButton-tertiary"]:active,
+.st-key-dpst_nav [role="tab"]:active, .st-key-lab_nav [role="tab"]:active,
+[data-testid="stTabs"] [role="tab"]:active, [data-testid="stExpander"] summary:active, .dpst-card:active {
+    transform: scale(0.97) !important; transition: transform 100ms ease-out !important;
+}
+html { font-optical-sizing: auto; }
+.dpst-page-title { letter-spacing: -0.02em !important; }
+
+/* Menos transparencia (ajuste del sistema): superficies sólidas, sin desenfoque. */
+@media (prefers-reduced-transparency: reduce) {
+    [data-testid="stHeader"], [data-testid="stSidebar"], [data-testid="stExpander"] details, [data-testid="stMetric"],
+    [data-testid="stPlotlyChart"], [data-testid="stDialog"], [data-testid="stDialog"] > div, [data-testid="stAlert"] > div,
+    .st-key-dpst_gate, .dpst-card, .st-key-lab_nav [role="tab"],
+    .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] {
+        backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+    }
+    [data-testid="stExpander"] details, [data-testid="stMetric"], [data-testid="stPlotlyChart"], .dpst-card,
+    .st-key-dpst_gate, [data-testid="stDialog"] > div, .st-key-lab_nav [role="tab"],
+    .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] { background: #121A2B !important; }
+    [data-testid="stDialog"] { background: rgba(5, 8, 16, 0.9) !important; }
+}
+/* Alto contraste (ajuste del sistema): bordes definidos y texto secundario más claro. */
+@media (prefers-contrast: more) {
+    [data-testid="stExpander"] details, [data-testid="stMetric"], [data-testid="stPlotlyChart"], .dpst-card,
+    .st-key-dpst_gate, .st-key-lab_nav [role="tab"], [data-baseweb="input"], [data-baseweb="select"] > div {
+        border-color: rgba(232, 237, 246, 0.55) !important;
+    }
+    .dpst-page-sub, .dpst-card .d, .dpst-hero .meta, [data-testid="stCaptionContainer"] { color: #C6D0E2 !important; }
+}
+
 /* El componente invisible que carga los efectos no debe ocupar espacio. */
 [data-testid="stElementContainer"]:has(> iframe[title="st.iframe"][height="0"]),
 [data-testid="stElementContainer"]:has(iframe[height="0"]) { display: none; }
@@ -198,17 +230,16 @@ _FX_JS = r"""
     border:1px solid rgba(148,170,210,.18);backdrop-filter:blur(16px) saturate(160%);-webkit-backdrop-filter:blur(16px) saturate(160%);
     box-shadow:0 12px 32px rgba(0,0,0,.35);transition:transform .25s cubic-bezier(.2,.8,.2,1),border-color .25s}
   #dpst-k:hover{transform:translateY(-2px);border-color:rgba(52,201,160,.5)}
+  #dpst-k:active{transform:scale(.96);transition:transform 100ms ease-out}
   #dpst-k kbd{font:500 11px "Geist Mono",ui-monospace,monospace;padding:3px 7px;border-radius:6px;color:#BDEFDF;
     background:rgba(52,201,160,.12);border:1px solid rgba(52,201,160,.35)}
   #dpst-k svg{width:16px;height:16px}
   #dpst-cmd{position:fixed;inset:0;z-index:1000003;display:none;align-items:flex-start;justify-content:center;
     padding:12vh 16px 16px;background:rgba(5,8,16,.55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
-  #dpst-cmd.open{display:flex;animation:dpstIn .18s ease}
-  @keyframes dpstIn{from{opacity:0}to{opacity:1}}
-  @keyframes dpstPop{from{opacity:0;transform:translateY(-8px) scale(.98)}to{opacity:1;transform:none}}
+  #dpst-cmd.open{display:flex}
   #dpst-cmd .box{width:min(620px,100%);border-radius:18px;overflow:hidden;background:rgba(14,21,38,.92);
     border:1px solid rgba(148,170,210,.18);box-shadow:0 30px 80px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.05);
-    backdrop-filter:blur(24px) saturate(170%);-webkit-backdrop-filter:blur(24px) saturate(170%);animation:dpstPop .22s cubic-bezier(.2,.9,.25,1)}
+    backdrop-filter:blur(24px) saturate(170%);-webkit-backdrop-filter:blur(24px) saturate(170%);will-change:transform,opacity,filter}
   #dpst-cmd .in{display:flex;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid rgba(148,170,210,.12)}
   #dpst-cmd .in svg{width:18px;height:18px;flex:none;color:#8C99B3}
   #dpst-cmd input{flex:1;min-width:0;background:transparent;border:0;outline:0;color:#E8EDF6;font:400 16px Geist,Inter,system-ui,sans-serif}
@@ -220,6 +251,8 @@ _FX_JS = r"""
   #dpst-cmd li.it .h{font:400 12px Geist,Inter,system-ui,sans-serif;color:#8C99B3}
   #dpst-cmd li.it.on{background:rgba(52,201,160,.14);color:#E8EDF6;box-shadow:inset 0 0 0 1px rgba(52,201,160,.3)}
   #dpst-cmd li.it.on .h{color:#BDEFDF}
+  #dpst-cmd li.it .here{font:500 11px "Geist Mono",ui-monospace,monospace;letter-spacing:.08em;padding:2px 8px;border-radius:999px;
+    color:#BDEFDF;background:rgba(52,201,160,.12);border:1px solid rgba(52,201,160,.35)}
   #dpst-cmd .empty{padding:22px 12px;color:#8C99B3;font:400 14px Geist,Inter,system-ui,sans-serif}
   #dpst-cmd .ft{display:flex;gap:16px;padding:10px 16px;border-top:1px solid rgba(148,170,210,.12);
     font:400 12px Geist,Inter,system-ui,sans-serif;color:#8C99B3}
@@ -231,7 +264,9 @@ _FX_JS = r"""
     box-shadow:0 0 0 5px rgba(52,201,160,.22),0 0 18px rgba(52,201,160,.8)}
   .dpst-hero:hover .dpst-cursor{opacity:1}
   @media (max-width:640px),(hover:none){#dpst-k kbd{display:none}}
-  @media (prefers-reduced-motion:reduce){#dpst-cmd.open,#dpst-cmd .box{animation:none}}
+  @media (prefers-reduced-transparency:reduce){#dpst-k,#dpst-cmd .box{background:#121A2B;backdrop-filter:none;-webkit-backdrop-filter:none}
+    #dpst-cmd{background:rgba(5,8,16,.88);backdrop-filter:none;-webkit-backdrop-filter:none}}
+  @media (prefers-contrast:more){#dpst-k,#dpst-cmd .box{border-color:rgba(232,237,246,.6)}#dpst-cmd li.it .h{color:#C6D0E2}}
   `;
   D.head.appendChild(css);
 
@@ -260,18 +295,68 @@ _FX_JS = r"""
     magnet(e); heroCursor(e);
   }, { passive: true });
 
-  /* ---------- botones magnéticos ---------- */
+  /* ---------- resortes (guía de Apple: damping ratio + response, sin duración fija) ----------
+     stiffness = (2π / response)²,  damping = 4π·ζ / response  (masa 1). Cada canal (x, y, escala)
+     es un resorte independiente y siempre parte del valor y la velocidad actuales, así que
+     cualquier movimiento se puede interrumpir y redirigir sin saltos. */
+  function Spring(value, zeta, response) {
+    this.v = value; this.t = value; this.vel = 0;
+    this.k = Math.pow(2 * Math.PI / response, 2); this.c = 4 * Math.PI * zeta / response;
+  }
+  Spring.prototype.step = function (dt) {
+    // Subpasos de 1/600 s: con un paso grande la integración se vuelve inestable y "explota".
+    const n = Math.max(1, Math.ceil(dt * 600)), h = dt / n;
+    for (let i = 0; i < n; i++) {
+      const a = -this.k * (this.v - this.t) - this.c * this.vel;
+      this.vel += a * h; this.v += this.vel * h;
+    }
+    if (Math.abs(this.v - this.t) < 0.001 && Math.abs(this.vel) < 0.01) { this.v = this.t; this.vel = 0; return false; }
+    return true;
+  };
+  const bodies = new Map();
+  let rafOn = false, lastT = 0;
+  function body(el) {
+    let b = bodies.get(el);
+    if (!b) { b = { x: new Spring(0, 1, 0.35), y: new Spring(0, 1, 0.35), s: new Spring(1, 1, 0.16) }; bodies.set(el, b); }
+    return b;
+  }
+  function tick(now) {
+    const dt = Math.min(0.032, (now - (lastT || now)) / 1000 || 0.016); lastT = now;
+    let alive = false;
+    bodies.forEach((b, el) => {
+      const m1 = b.x.step(dt), m2 = b.y.step(dt), m3 = b.s.step(dt);
+      if (!el.isConnected) { bodies.delete(el); return; }
+      const rest = !m1 && !m2 && !m3 && b.x.v === 0 && b.y.v === 0 && b.s.v === 1;
+      el.style.transform = rest ? '' : 'translate(' + b.x.v.toFixed(2) + 'px,' + b.y.v.toFixed(2) + 'px) scale(' + b.s.v.toFixed(4) + ')';
+      if (m1 || m2 || m3) alive = true; else if (rest) bodies.delete(el);
+    });
+    if (alive) requestAnimationFrame(tick); else { rafOn = false; lastT = 0; }
+  }
+  const raf = P.requestAnimationFrame.bind(P);
+  function requestAnimationFrame(cb) { return raf(cb); }
+  function kick() { if (!rafOn) { rafOn = true; requestAnimationFrame(tick); } }
+
+  /* ---------- botones principales: magnéticos y con respuesta al presionar ---------- */
+  const PRIMARY = '[data-testid="stBaseButton-primary"]';
   let magEl = null;
   function magnet(e) {
     if (reduce || e.pointerType === 'touch') return;
-    const b = e.target && e.target.closest ? e.target.closest('[data-testid="stBaseButton-primary"]') : null;
-    if (magEl && magEl !== b) { magEl.style.transform = ''; magEl = null; }
-    if (!b) return;
-    const r = b.getBoundingClientRect();
-    const dx = (e.clientX - r.left - r.width / 2) / r.width, dy = (e.clientY - r.top - r.height / 2) / r.height;
-    b.style.transform = 'translate(' + (dx * 8).toFixed(1) + 'px,' + (dy * 6).toFixed(1) + 'px)';
-    magEl = b;
+    const btn = e.target && e.target.closest ? e.target.closest(PRIMARY) : null;
+    if (magEl && magEl !== btn) { const o = body(magEl); o.x.t = 0; o.y.t = 0; o.s.t = 1; kick(); magEl = null; }
+    if (!btn || btn.disabled) return;
+    const r = btn.getBoundingClientRect(), o = body(btn);
+    o.x.t = (e.clientX - r.left - r.width / 2) / r.width * 8;
+    o.y.t = (e.clientY - r.top - r.height / 2) / r.height * 6;
+    magEl = btn; kick();
   }
+  D.addEventListener('pointerdown', e => {
+    const btn = e.target && e.target.closest ? e.target.closest(PRIMARY) : null;
+    if (!btn || btn.disabled) return;
+    const o = body(btn); o.s.t = 0.96; kick();   // feedback en el instante del toque
+  }, { passive: true });
+  function release() { bodies.forEach(o => { o.s.t = 1; }); kick(); }
+  D.addEventListener('pointerup', release, { passive: true });
+  D.addEventListener('pointercancel', release, { passive: true });
 
   /* ---------- punto que sigue al mouse en la línea de la portada ---------- */
   function heroCursor(e) {
@@ -305,24 +390,59 @@ _FX_JS = r"""
     + '<ul role="listbox"></ul><div class="ft"><span><kbd>↑↓</kbd>moverse</span><span><kbd>Enter</kbd>abrir</span><span><kbd>Esc</kbd>cerrar</span></div></div>';
   D.body.appendChild(ov);
   const q = ov.querySelector('input'), ul = ov.querySelector('ul');
-  let sel = 0, shown = [];
+  let sel = 0, shown = [], hereIdx = -1;
 
   const norm = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  function current() {
+    const pick = s => { const a = D.querySelector(s + ' > [data-testid="stTabs"] > div > [role="tablist"] > [role="tab"][aria-selected="true"]'); return a ? a.textContent.trim() : null; };
+    return { top: pick('.st-key-dpst_nav'), sub: pick('.st-key-lab_nav') };
+  }
   function render() {
+    const here = current();
     const term = norm(q.value.trim());
     shown = fx.items.filter(it => !term || norm(it.label + ' ' + it.group + ' ' + (it.hint || '')).includes(term));
     sel = Math.min(sel, Math.max(0, shown.length - 1));
     if (!shown.length) { ul.innerHTML = '<li class="empty">No hay secciones con «' + q.value.replace(/</g, '&lt;') + '». Prueba con otra palabra.</li>'; return; }
-    let html = '', g = null;
+    let html = '', g = null; hereIdx = -1;
     shown.forEach((it, i) => {
       if (it.group !== g) { g = it.group; html += '<li class="grp" role="presentation">' + g + '</li>'; }
-      html += '<li class="it' + (i === sel ? ' on' : '') + '" role="option" data-i="' + i + '" aria-selected="' + (i === sel) + '"><span>' + it.label + '</span><span class="h">' + (it.hint || '') + '</span></li>';
+      const isHere = it.top === here.top && (it.sub ? it.sub === here.sub : true) && !(it.sub == null && here.top && fx.items.some(x => x.sub && x.top === here.top && x.sub === here.sub));
+      if (isHere) hereIdx = i;
+      const tag = isHere ? '<span class="here">Estás aquí</span>' : '<span class="h">' + (it.hint || '') + '</span>';
+      html += '<li class="it' + (i === sel ? ' on' : '') + '" role="option" data-i="' + i + '" aria-selected="' + (i === sel) + '"' + (isHere ? ' aria-current="page"' : '') + '><span>' + it.label + '</span>' + tag + '</li>';
     });
     ul.innerHTML = html;
     const on = ul.querySelector('.on'); if (on) on.scrollIntoView({ block: 'nearest' });
   }
-  function open() { ov.classList.add('open'); q.value = ''; sel = 0; render(); setTimeout(() => q.focus(), 20); }
-  function close() { ov.classList.remove('open'); }
+  const box = ov.querySelector('.box');
+  let anim = null, scrimAnim = null, state = 'closed';
+  function frames() {
+    // Apple: los materiales se "materializan" (desenfoque + escala), no solo aparecen; con
+    // movimiento reducido, solo un fundido corto.
+    return reduce
+      ? [[{ opacity: 0 }, { opacity: 1 }], { duration: 140, easing: 'linear', fill: 'both' }]
+      : [[{ opacity: 0, transform: 'scale(.9)', filter: 'blur(10px)' }, { opacity: 1, transform: 'none', filter: 'blur(0)' }],
+         { duration: 300, easing: 'cubic-bezier(.2,.9,.25,1)', fill: 'both' }];
+  }
+  function open() {
+    if (state === 'open' || state === 'opening') return;
+    if (state === 'closing' && anim) {          // interrumpido a mitad del cierre: se revierte desde donde va
+      state = 'opening'; anim.reverse(); scrimAnim && scrimAnim.reverse(); q.focus(); return;
+    }
+    ov.classList.add('open'); q.value = ''; sel = 0; render();
+    if (hereIdx > 0) { sel = hereIdx; render(); }   // abre con la sección actual seleccionada
+    const c = chip.getBoundingClientRect(), r = box.getBoundingClientRect();   // sale desde el botón que lo abrió
+    box.style.transformOrigin = (c.left + c.width / 2 - r.left) + 'px ' + (c.top + c.height / 2 - r.top) + 'px';
+    const [kf, opt] = frames();
+    anim = box.animate(kf, opt); scrimAnim = ov.animate([{ opacity: 0 }, { opacity: 1 }], { duration: opt.duration, fill: 'both' });
+    state = 'opening'; anim.onfinish = () => { if (state === 'opening') state = 'open'; };
+    setTimeout(() => q.focus(), 20);
+  }
+  function close() {
+    if (state === 'closed' || state === 'closing' || !anim) { if (!anim) ov.classList.remove('open'); return; }
+    state = 'closing'; anim.reverse(); scrimAnim && scrimAnim.reverse();   // mismo camino de vuelta
+    anim.onfinish = () => { if (state === 'closing') { state = 'closed'; ov.classList.remove('open'); chip.focus({ preventScroll: true }); } };
+  }
   function clickTab(scope, label) {
     const tabs = D.querySelectorAll(scope + ' > [data-testid="stTabs"] > div > [role="tablist"] > [role="tab"]');
     for (const t of tabs) { if (t.textContent.trim() === label) { t.click(); return t; } }
@@ -361,8 +481,8 @@ _FX_JS = r"""
     else if (e.key === 'Escape') { e.preventDefault(); close(); }
   });
   D.addEventListener('keydown', e => {
-    if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); ov.classList.contains('open') ? close() : open(); }
-    else if (e.key === 'Escape' && ov.classList.contains('open')) close();
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); (state === 'open' || state === 'opening') ? close() : open(); }
+    else if (e.key === 'Escape' && (state === 'open' || state === 'opening')) close();
   });
 })();
 </script>
