@@ -47,7 +47,7 @@ from src.trace import git_commit
 from src.risk_extras import expected_shortfall_fraction
 from src.rates import fetch_bond_series, list_long_term_yield_countries, ping_fred, search_bond_series
 from laboratorio_v2 import LAB_MODULES, render_portfolio_lab
-from src.ui_fx import apply_ui_fx
+from src.ui_fx import apply_ui_fx, news_carousel_html
 from src.news_links import verify_items
 from src.forecasting import (
     FORECAST_MODELS,
@@ -1758,6 +1758,16 @@ def _show_news(items: "list[dict]", hidden: int, empty_text: str) -> None:
         st.caption(f"Se ocultaron {hidden} noticia(s) cuyo enlace no abría.")
 
 
+def _show_news_carousel(items: "list[dict]", hidden: int, empty_text: str, label: str) -> None:
+    """Las mismas noticias de `_show_news`, en un recuadro grande que pasa solo (ver src/ui_fx.py)."""
+    if not items:
+        st.info(empty_text)
+        return
+    st.markdown(news_carousel_html(items, label, _format_news_date), unsafe_allow_html=True)
+    if hidden:
+        st.caption(f"Se ocultaron {hidden} noticia(s) cuyo enlace no abría.")
+
+
 def render_news_home() -> None:
     """Noticias de la semana en Inicio: economía en general y la empresa que se esté mirando."""
     st.markdown("#### Noticias de la semana", help=(
@@ -1771,14 +1781,14 @@ def render_news_home() -> None:
         with tab_general:
             with st.spinner("Buscando noticias..."):
                 items, hidden = _merged_recent_news(None, NEWS_HOME_ITEMS)
-            _show_news(items, hidden, "No se encontraron noticias económicas en este momento.")
+            _show_news_carousel(items, hidden, "No se encontraron noticias económicas en este momento.", "Economía")
         with tab_asset:
             if not ticker:
                 st.info("Escoge una empresa en **Preselección de activos** y aquí verás sus noticias.")
             else:
                 with st.spinner(f"Buscando noticias de {ticker}..."):
                     items, hidden = _merged_recent_news(ticker, NEWS_HOME_ITEMS)
-                _show_news(items, hidden, f"No se encontraron noticias recientes de {ticker}.")
+                _show_news_carousel(items, hidden, f"No se encontraron noticias recientes de {ticker}.", ticker)
     except Exception:
         st.info("No se pudieron cargar las noticias en este momento.")
 

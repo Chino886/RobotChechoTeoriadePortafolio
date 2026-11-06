@@ -14,6 +14,7 @@ bloquea, la app funciona igual sin los efectos.
 Como el resto de la CSS del proyecto, apunta a atributos internos de Streamlit
 (data-testid, st-key-*, react-aria) y puede requerir ajuste si cambia la versión.
 """
+import html
 import json
 
 import streamlit as st
@@ -197,6 +198,110 @@ html { font-optical-sizing: auto; }
     .dpst-page-sub, .dpst-card .d, .dpst-hero .meta, [data-testid="stCaptionContainer"] { color: #C6D0E2 !important; }
 }
 
+/* Noticias de Inicio: recuadro grande que pasa solo. */
+.dpst-news {
+    display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr); gap: 14px; outline: none;
+}
+.dpst-news:focus-visible .nv-stage { box-shadow: 0 0 0 2px #34C9A0, 0 24px 60px rgba(0,0,0,.35); }
+.dpst-news .nv-stage {
+    position: relative; overflow: hidden; min-height: 390px; border-radius: 22px;
+    border: 1px solid rgba(148, 170, 210, 0.16); touch-action: pan-y; cursor: grab;
+    background: #0E1526; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255,255,255,.04);
+}
+.dpst-news .nv-stage.dragging { cursor: grabbing; }
+.dpst-news .nv-glow {
+    position: absolute; inset: -20%; pointer-events: none; transition: background 0.9s ease;
+    background: radial-gradient(60% 60% at 85% 10%, rgba(52, 201, 160, 0.22), transparent 60%),
+                radial-gradient(50% 60% at 0% 100%, rgba(106, 168, 255, 0.14), transparent 60%);
+}
+.dpst-news[data-tone="1"] .nv-glow {
+    background: radial-gradient(60% 60% at 85% 10%, rgba(106, 168, 255, 0.24), transparent 60%),
+                radial-gradient(50% 60% at 0% 100%, rgba(52, 201, 160, 0.12), transparent 60%);
+}
+.dpst-news[data-tone="2"] .nv-glow {
+    background: radial-gradient(60% 60% at 85% 10%, rgba(111, 227, 193, 0.18), transparent 60%),
+                radial-gradient(50% 60% at 0% 100%, rgba(245, 184, 75, 0.10), transparent 60%);
+}
+.dpst-news .nv-track { position: relative; display: flex; height: 100%; min-height: 390px; will-change: transform; }
+.dpst-news .nv-slide {
+    position: relative; flex: 0 0 100%; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end;
+    gap: 14px; padding: 2rem 2.2rem 4.6rem; user-select: none; -webkit-user-select: none;
+}
+.dpst-news .nv-mono {
+    position: absolute; right: 1.2rem; top: -1.4rem; font-family: 'Instrument Serif', Georgia, serif;
+    font-size: 15rem; line-height: 1; color: rgba(232, 237, 246, 0.05); pointer-events: none;
+}
+.dpst-news .nv-meta {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 0.74rem; letter-spacing: 0.08em; text-transform: uppercase; color: #8C99B3;
+}
+.dpst-news .nv-src { color: #BDEFDF; padding: 3px 10px; border-radius: 999px; background: rgba(52,201,160,.12); border: 1px solid rgba(52,201,160,.32); }
+.dpst-news .nv-title {
+    font-family: 'Instrument Serif', Georgia, serif; font-size: clamp(1.8rem, 3.2vw, 3rem); line-height: 1.06;
+    letter-spacing: -0.015em; color: #E8EDF6; text-wrap: balance; max-width: 30ch;
+    display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+}
+.dpst-news .nv-link {
+    align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 999px;
+    font-weight: 600; font-size: 0.92rem; color: #0A0F1C !important; text-decoration: none !important;
+    background: linear-gradient(180deg, #6FE3C1, #22A883); box-shadow: 0 8px 22px rgba(52, 201, 160, 0.25);
+    transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s;
+}
+.dpst-news .nv-link:hover { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(52, 201, 160, 0.35); }
+.dpst-news .nv-link:active { transform: scale(.97); transition-duration: 100ms; }
+.dpst-news .nv-ui {
+    position: absolute; left: 2.2rem; right: 1.2rem; bottom: 1.1rem; display: flex; align-items: center; justify-content: space-between; z-index: 2;
+}
+.dpst-news .nv-count { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.8rem; color: #8C99B3; font-variant-numeric: tabular-nums; }
+.dpst-news .nv-count b { color: #E8EDF6; font-weight: 500; }
+.dpst-news .nv-btns { display: flex; gap: 8px; }
+.dpst-news .nv-btn {
+    width: 38px; height: 38px; display: grid; place-items: center; border-radius: 999px; cursor: pointer; color: #E8EDF6;
+    background: rgba(18, 26, 43, 0.7); border: 1px solid rgba(148, 170, 210, 0.2); backdrop-filter: blur(10px);
+    transition: border-color .2s, background .2s, transform .1s ease-out;
+}
+.dpst-news .nv-btn:hover { border-color: #34C9A0; background: rgba(52, 201, 160, 0.14); }
+.dpst-news .nv-btn:active { transform: scale(.92); }
+.dpst-news .nv-btn svg { width: 16px; height: 16px; }
+.dpst-news .nv-play .i-play, .dpst-news.paused .nv-play .i-pause { display: none; }
+.dpst-news.paused .nv-play .i-play { display: block; }
+.dpst-news .nv-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(148,170,210,.10); }
+.dpst-news .nv-progress i { display: block; height: 100%; width: 100%; transform-origin: 0 50%; transform: scaleX(0);
+    background: linear-gradient(90deg, #22A883, #6FE3C1); box-shadow: 0 0 10px rgba(52,201,160,.6); }
+.dpst-news .nv-list {
+    position: relative; list-style: none; margin: 0; padding: 6px; display: flex; flex-direction: column; gap: 4px; min-width: 0;
+    border-radius: 22px; border: 1px solid rgba(148, 170, 210, 0.14); background: rgba(18, 26, 43, 0.55);
+    backdrop-filter: blur(10px); max-height: 390px; overflow: auto;
+}
+.dpst-news .nv-row {
+    position: relative; width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; row-gap: 2px;
+    text-align: left; padding: 11px 12px 13px; border-radius: 14px; border: 1px solid transparent; background: transparent;
+    color: #AEB9CE; cursor: pointer; font: inherit; overflow: hidden;
+    transition: background .25s, border-color .25s, color .25s, transform .1s ease-out;
+}
+.dpst-news .nv-row:hover { background: rgba(232, 237, 246, 0.04); color: #E8EDF6; }
+.dpst-news .nv-row:active { transform: scale(.98); }
+.dpst-news .nv-row.on { background: rgba(52, 201, 160, 0.10); border-color: rgba(52, 201, 160, 0.30); color: #E8EDF6; }
+.dpst-news .nv-n { grid-row: span 2; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.75rem; color: #34C9A0; padding-top: 2px; }
+.dpst-news .nv-rt { font-size: 0.9rem; font-weight: 500; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dpst-news .nv-rs { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.7rem; color: #8C99B3; letter-spacing: .04em; }
+.dpst-news .nv-bar { position: absolute; left: 12px; right: 12px; bottom: 5px; height: 2px; border-radius: 2px; background: transparent; }
+.dpst-news .nv-row.on .nv-bar { background: rgba(148,170,210,.14); }
+.dpst-news .nv-bar i { display: block; height: 100%; width: 100%; transform-origin: 0 50%; transform: scaleX(0); background: #34C9A0; border-radius: 2px; }
+.dpst-news .nv-row:not(.on) .nv-bar i { transform: scaleX(0) !important; }
+@media (max-width: 900px) {
+    .dpst-news { grid-template-columns: minmax(0, 1fr); }
+    .dpst-news .nv-list { max-height: none; flex-direction: row; overflow-x: auto; scroll-snap-type: x mandatory; }
+    .dpst-news .nv-list li { flex: 0 0 min(78%, 300px); scroll-snap-align: start; }
+}
+@media (max-width: 560px) {
+    .dpst-news .nv-stage, .dpst-news .nv-track { min-height: 320px; }
+    .dpst-news .nv-slide { padding: 1.4rem 1.2rem 4.4rem; }
+    .dpst-news .nv-ui { left: 1.2rem; right: 0.8rem; }
+    .dpst-news .nv-mono { font-size: 10rem; }
+}
+@media (prefers-reduced-transparency: reduce) { .dpst-news .nv-list, .dpst-news .nv-btn { backdrop-filter: none; background: #121A2B; } }
+
 /* El componente invisible que carga los efectos no debe ocupar espacio. */
 [data-testid="stElementContainer"]:has(> iframe[title="st.iframe"][height="0"]),
 [data-testid="stElementContainer"]:has(iframe[height="0"]) { display: none; }
@@ -378,6 +483,120 @@ _FX_JS = r"""
     cur.querySelector('.d').style.top = (y - (sr.top - hr.top)) + 'px';
   }
 
+  /* ---------- carrusel de noticias de Inicio ----------
+     Pasa solo cada N segundos (se pausa con el mouse encima, con el foco dentro, con el botón
+     de pausa o si la pestaña no se ve). Se puede arrastrar 1:1 con el dedo o el mouse; al soltar
+     se proyecta el impulso (fórmula de Apple, d = 0.998) para elegir la noticia y el resorte
+     hereda la velocidad del gesto. En los bordes hay resistencia progresiva (rubber-band). */
+  const NEWS = new Set();
+  function rubber(over, dim) { const c = 0.55; return (over * dim * c) / (dim + c * Math.abs(over)); }
+  function initNews(root) {
+    if (root.__nv) return;
+    const stage = root.querySelector('.nv-stage'), track = root.querySelector('.nv-track');
+    const slides = [...root.querySelectorAll('.nv-slide')], rows = [...root.querySelectorAll('.nv-row')];
+    const n = slides.length; if (!n || !stage || !track) return;
+    const count = root.querySelector('.nv-count b'), prog = root.querySelector('.nv-progress i'), list = root.querySelector('.nv-list');
+    const playBtn = root.querySelector('[data-play]');
+    const s = root.__nv = { i: 0, x: new Spring(0, 1, 0.45), elapsed: 0, dur: +root.dataset.autoplay || 7000,
+                            paused: false, hover: false, focus: false, drag: null, seen: true };
+    const W = () => stage.clientWidth || 1;
+    s.paint = () => { track.style.transform = 'translate3d(' + s.x.v.toFixed(2) + 'px,0,0)'; };
+    function syncList() {
+      const li = rows[s.i] && rows[s.i].parentElement; if (!li || !list) return;
+      const horizontal = list.scrollWidth > list.clientWidth + 4 && getComputedStyle(list).flexDirection === 'row';
+      if (horizontal) {
+        if (li.offsetLeft < list.scrollLeft || li.offsetLeft + li.offsetWidth > list.scrollLeft + list.clientWidth)
+          list.scrollTo({ left: li.offsetLeft - 6, behavior: reduce ? 'auto' : 'smooth' });
+      } else if (li.offsetTop < list.scrollTop || li.offsetTop + li.offsetHeight > list.scrollTop + list.clientHeight) {
+        list.scrollTo({ top: li.offsetTop - 6, behavior: reduce ? 'auto' : 'smooth' });
+      }
+    }
+    s.go = (i, vel) => {
+      s.i = ((i % n) + n) % n; s.elapsed = 0; s.x.t = -s.i * W();
+      if (vel != null) s.x.vel = vel;
+      if (reduce) { s.x.v = s.x.t; s.x.vel = 0; s.paint(); track.animate([{ opacity: 0.35 }, { opacity: 1 }], { duration: 220 }); }
+      slides.forEach((el, k) => { if (k === s.i) el.removeAttribute('aria-hidden'); else el.setAttribute('aria-hidden', 'true'); });
+      rows.forEach((el, k) => el.classList.toggle('on', k === s.i));
+      if (count) count.textContent = String(s.i + 1).padStart(2, '0');
+      root.dataset.tone = String(s.i % 3);
+      syncList();
+    };
+    root.addEventListener('click', e => {
+      const go = e.target.closest('[data-go]'), nav = e.target.closest('[data-nav]'), play = e.target.closest('[data-play]');
+      if (go) s.go(+go.dataset.go);
+      else if (nav) s.go(s.i + (+nav.dataset.nav));
+      else if (play) {
+        s.paused = !s.paused; root.classList.toggle('paused', s.paused);
+        play.setAttribute('aria-label', s.paused ? 'Reanudar el paso automático' : 'Pausar el paso automático');
+      }
+    });
+    root.addEventListener('keydown', e => {
+      if (e.key === 'ArrowRight') { e.preventDefault(); s.go(s.i + 1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); s.go(s.i - 1); }
+    });
+    root.addEventListener('pointerenter', () => { s.hover = true; });
+    root.addEventListener('pointerleave', () => { s.hover = false; });
+    root.addEventListener('focusin', () => { s.focus = true; });
+    root.addEventListener('focusout', e => { if (!root.contains(e.relatedTarget)) s.focus = false; });
+    /* arrastre */
+    stage.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || e.target.closest('.nv-btn')) return;
+      s.drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, start: s.x.v, moved: false, hist: [{ x: e.clientX, t: performance.now() }] };
+    });
+    stage.addEventListener('pointermove', e => {
+      const d = s.drag; if (!d || e.pointerId !== d.id) return;
+      const dx = e.clientX - d.x0, dy = e.clientY - d.y0;
+      if (!d.moved) {
+        if (Math.abs(dx) < 10 || Math.abs(dx) < Math.abs(dy)) { if (Math.abs(dy) > 10) s.drag = null; return; }
+        d.moved = true; stage.classList.add('dragging');
+        try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+      }
+      const min = -(n - 1) * W(); let x = d.start + dx;
+      if (x > 0) x = rubber(x, W()); else if (x < min) x = min + rubber(x - min, W());
+      s.x.v = s.x.t = x; s.x.vel = 0; s.paint();
+      d.hist.push({ x: e.clientX, t: performance.now() }); if (d.hist.length > 6) d.hist.shift();
+    });
+    function endDrag(e) {
+      const d = s.drag; if (!d || (e && e.pointerId !== d.id)) return;
+      s.drag = null; stage.classList.remove('dragging');
+      if (!d.moved) return;
+      const a = d.hist[0], b = d.hist[d.hist.length - 1], dt = Math.max(1, b.t - a.t);
+      const vel = (b.x - a.x) / dt * 1000;                                  // px/s
+      const projected = s.x.v + (vel / 1000) * 0.998 / (1 - 0.998);        // dónde iba a parar
+      const idx = Math.max(0, Math.min(n - 1, Math.round(-projected / W())));
+      s.go(idx, vel);
+      stage.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); }, { capture: true, once: true });
+    }
+    stage.addEventListener('pointerup', endDrag);
+    stage.addEventListener('pointercancel', endDrag);
+    if (P.ResizeObserver) new P.ResizeObserver(() => { s.x.v = s.x.t = -s.i * W(); s.x.vel = 0; s.paint(); syncList(); }).observe(stage);
+    if (P.IntersectionObserver) new P.IntersectionObserver(es => { s.seen = es[0].isIntersecting; }).observe(root);
+    NEWS.add(root); s.go(0); s.x.v = s.x.t; s.paint();
+    if (!newsOn) { newsOn = true; raf(newsTick); }
+  }
+  let newsOn = false, newsLast = 0;
+  function newsTick(now) {
+    const dt = Math.min(0.05, (now - (newsLast || now)) / 1000); newsLast = now;
+    NEWS.forEach(root => {
+      if (!root.isConnected) { NEWS.delete(root); return; }
+      const s = root.__nv;
+      if (!s.drag && s.x.step(dt)) s.paint();
+      const visible = s.seen && root.offsetParent !== null && !D.hidden;
+      if (visible && !s.paused && !s.hover && !s.focus && !s.drag) {
+        s.elapsed += dt * 1000;
+        if (s.elapsed >= s.dur) s.go(s.i + 1);
+      }
+      const p = Math.min(1, s.elapsed / s.dur), sc = 'scaleX(' + p.toFixed(4) + ')';
+      const bar = root.querySelector('.nv-progress i'); if (bar) bar.style.transform = sc;
+      const rb = root.querySelector('.nv-row.on .nv-bar i'); if (rb) rb.style.transform = sc;
+    });
+    if (NEWS.size) raf(newsTick); else { newsOn = false; newsLast = 0; }
+  }
+  function scanNews() { D.querySelectorAll('.dpst-news').forEach(initNews); }
+  let scanT = 0;
+  new P.MutationObserver(() => { clearTimeout(scanT); scanT = setTimeout(scanNews, 150); }).observe(D.body, { childList: true, subtree: true });
+  scanNews();
+
   /* ---------- paleta de comandos ---------- */
   const ico = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
   const chip = D.createElement('button'); chip.id = 'dpst-k'; chip.type = 'button';
@@ -498,3 +717,64 @@ def apply_ui_fx(items: "list[dict]") -> None:
     st.markdown(FX_CSS, unsafe_allow_html=True)
     payload = json.dumps(items, ensure_ascii=False).replace("</", "<\\/")
     components.html(_FX_JS.replace("__ITEMS__", payload), height=0)
+
+
+NEWS_AUTOPLAY_MS = 7000  # tiempo que se muestra cada noticia antes de pasar a la siguiente
+
+
+def _safe_link(url: str) -> str:
+    url = str(url or "").strip()
+    return html.escape(url, quote=True) if url.lower().startswith(("http://", "https://")) else ""
+
+
+def news_carousel_html(items: "list[dict]", label: str, format_date) -> str:
+    """
+    Recuadro grande de noticias que pasan solas (carrusel). Usa las mismas noticias ya
+    verificadas por la app (título, enlace, medio, fecha); solo cambia cómo se muestran.
+    Sin JavaScript se ve la primera noticia y la lista completa con sus enlaces.
+    El HTML no lleva líneas en blanco para que Markdown no lo parta.
+    """
+    slides, rows = [], []
+    n = len(items)
+    for i, item in enumerate(items):
+        title = html.escape(str(item.get("title", "")).strip() or "Noticia sin título")
+        publisher = html.escape(str(item.get("publisher", "")).strip() or "Medio N/D")
+        when = html.escape(format_date(item.get("published")))
+        link = _safe_link(item.get("link", ""))
+        mono = publisher[:1].upper() if publisher[:1].isalnum() else "N"
+        hidden_attr = ' aria-hidden="true"' if i else ""
+        cta = (f'<a class="nv-link" href="{link}" target="_blank" rel="noopener noreferrer">'
+               f'Leer la noticia completa<span aria-hidden="true">↗</span></a>') if link else ""
+        slides.append(
+            f'<article class="nv-slide" data-i="{i}" aria-roledescription="noticia" aria-label="{i + 1} de {n}"'
+            f'{hidden_attr}>'
+            f'<div class="nv-mono" aria-hidden="true">{mono}</div>'
+            f'<div class="nv-meta"><span class="nv-src">{publisher}</span><span class="nv-dot">·</span><span>{when}</span></div>'
+            f'<div class="nv-title">{title}</div>{cta}</article>'
+        )
+        rows.append(
+            f'<li><button type="button" class="nv-row{" on" if i == 0 else ""}" data-go="{i}" aria-label="Ver noticia {i + 1}: {title}">'
+            f'<span class="nv-n">{i + 1:02d}</span><span class="nv-rt">{title}</span>'
+            f'<span class="nv-rs">{publisher}</span><span class="nv-bar"><i></i></span></button></li>'
+        )
+    controls = (
+        '<div class="nv-ui">'
+        f'<span class="nv-count"><b>01</b> / {n:02d}</span>'
+        '<span class="nv-btns">'
+        '<button type="button" class="nv-btn" data-nav="-1" aria-label="Noticia anterior">'
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>'
+        '<button type="button" class="nv-btn nv-play" data-play aria-label="Pausar el paso automático">'
+        '<svg class="i-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>'
+        '<svg class="i-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg></button>'
+        '<button type="button" class="nv-btn" data-nav="1" aria-label="Noticia siguiente">'
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 18 6-6-6-6"/></svg></button>'
+        '</span></div>'
+    )
+    return (
+        f'<div class="dpst-news" data-autoplay="{NEWS_AUTOPLAY_MS}" tabindex="0" role="region" '
+        f'aria-roledescription="carrusel" aria-label="Noticias: {html.escape(label)}">'
+        f'<div class="nv-stage"><div class="nv-glow" aria-hidden="true"></div>'
+        f'<div class="nv-track">{"".join(slides)}</div>{controls}'
+        f'<div class="nv-progress" aria-hidden="true"><i></i></div></div>'
+        f'<ol class="nv-list">{"".join(rows)}</ol></div>'
+    )
