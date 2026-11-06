@@ -39,7 +39,9 @@ from src.comparison import (
     processed_prices_export,
 )
 from src.data import FREQUENCY_RULES, fetch_asset_data, fetch_fx_to_usd, fetch_many, resample_prices
-from src.rates import fetch_bond_series, list_long_term_yield_countries, search_bond_series
+from src.market import fetch_quotes
+from src.connectivity import run_checks
+from src.rates import fetch_bond_series, list_long_term_yield_countries, ping_fred, search_bond_series
 from laboratorio_v2 import render_portfolio_lab
 from src.news_links import verify_items
 from src.forecasting import (
@@ -2055,11 +2057,72 @@ def render_home(user_name: str, user_email: str) -> None:
         for member in MEMBERS:
             st.write(f"- {member}")
         st.info(EXECUTION_POLICY_SUMMARY)
+    with st.expander("Comprobar conexiones reales (evidencia de la prueba P2-3)"):
+        render_connection_check()
     st.caption(
         f"Sesión iniciada como {user_name} ({user_email}) · última actualización {LAST_UPDATE}"
     )
     if not DEV_MODE and st.button("Cerrar sesión"):
         st.logout()
+
+
+def _secret(name: str):
+    try:
+        return st.secrets.get(name)
+    except Exception:  # sin secrets.toml, st.secrets lanza en vez de devolver None
+        return None
+
+
+def _connection_checks() -> dict:
+    """Una consulta real y pequeña a cada fuente externa del bot."""
+    def yahoo_quote():
+        q = fetch_quotes(["SPY"])[0]
+        if not q.ok:
+            return False, q.error or "sin dato"
+        when = q.last_bar_at.strftime("%Y-%m-%d %H:%M UTC") if q.last_bar_at else "hora no informada"
+        return True, f"SPY {q.price:,.2f} {q.currency or ''} · última barra {when} · {q.session}"
+
+    def yahoo_history():
+        today = pd.Timestamp.today().normalize()
+        res = fetch_asset_data("SPY", today - pd.Timedelta(days=30), today)
+        if not res.ok:
+            return False, res.error or "sin datos"
+        return True, f"SPY: {len(res.prices)} cierres diarios, último {res.prices.index.max().date()}"
+
+    def fred():
+        key = _secret("FRED_API_KEY")
+        if not key:
+            return False, "sin FRED_API_KEY en los secretos de la app"
+        return True, f"búsqueda respondió ({ping_fred(key):,} series de bonos)"
+
+    def google_news():
+        items = get_google_news_rss("economía Colombia", 3)
+        return (True, f"{len(items)} noticias recibidas") if items else (False, "sin respuesta o sin noticias")
+
+    def alpha_vantage():
+        status = _fetch_alpha_vantage(None, GENERAL_NEWS_TOPIC, 3)["status"]
+        return status == "ok", status
+
+    return {"Yahoo Finance · cotización (1 min)": yahoo_quote, "Yahoo Finance · históricos": yahoo_history,
+            "FRED · tasas": fred, "Google News · RSS": google_news, "Alpha Vantage · noticias": alpha_vantage}
+
+
+def render_connection_check() -> None:
+    """Botón que consulta cada fuente real y acumula el resultado con su hora (consultas sucesivas)."""
+    st.caption(
+        "Cada clic hace una consulta real a cada fuente y deja una fila con la hora, el resultado y el tiempo. "
+        "Para la evidencia de P2-3: hagan al menos dos consultas separadas por unos minutos, descarguen el CSV "
+        "y tomen captura. Se guarda solo en esta sesión del navegador."
+    )
+    if st.button("Probar conexiones ahora", type="primary", key="conn_check_run"):
+        with st.spinner("Consultando cada fuente..."):
+            st.session_state.setdefault("conn_check_log", []).extend(run_checks(_connection_checks()))
+    log = st.session_state.get("conn_check_log", [])
+    if log:
+        df = pd.DataFrame(log)
+        st.dataframe(df, hide_index=True)
+        st.download_button("Descargar evidencia (CSV)", df.to_csv(index=False).encode("utf-8"),
+                           file_name="evidencia_conexiones.csv", mime="text/csv", key="conn_check_csv")
 
 
 def _need_asset() -> bool:
