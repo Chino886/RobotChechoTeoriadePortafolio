@@ -175,8 +175,12 @@ INDICATORS_HELP = """
 """
 
 
-# Pestañas del laboratorio como botones en cuadrícula con borde dorado. Apunta a clases
+# Pestañas del laboratorio como botones en cuadrícula con borde verde. Apunta a clases
 # internas de Streamlit (st-key-*, data-testid) y puede requerir ajuste si cambia la versión.
+# Módulos del laboratorio (pestañas). También alimentan el buscador Ctrl/⌘ + K de app.py.
+LAB_MODULES = ["Riesgo conjunto", "Estrés y estimadores", "Markowitz y fronteras", "Black-Litterman",
+               "Rebalanceo", "Backtest", "Beta, CAPM y valoración", "Exportar"]
+
 LAB_NAV_CSS = """
 <style>
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] {
@@ -185,23 +189,23 @@ LAB_NAV_CSS = """
 }
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"] {
     height: auto; min-height: 3.4rem; padding: 0.75rem 0.9rem; justify-content: center; text-align: center;
-    border: 1px solid rgba(235, 195, 94, 0.55); border-radius: 12px;
-    background: linear-gradient(180deg, rgba(235, 195, 94, 0.08), rgba(235, 195, 94, 0.02));
+    border: 1px solid rgba(52, 201, 160, 0.55); border-radius: 12px;
+    background: linear-gradient(180deg, rgba(52, 201, 160, 0.08), rgba(52, 201, 160, 0.02));
     transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
 }
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"]:hover {
-    background: rgba(235, 195, 94, 0.16); transform: translateY(-1px);
-    box-shadow: 0 4px 14px rgba(235, 195, 94, 0.15);
+    background: rgba(52, 201, 160, 0.16); transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(52, 201, 160, 0.15);
 }
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"] p {
-    font-size: 0.98rem; font-weight: 700; color: #E9D9A8; white-space: normal;
+    font-size: 0.98rem; font-weight: 700; color: #BDEFDF; white-space: normal;
 }
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"][aria-selected="true"] {
-    background: linear-gradient(180deg, #F2CF6E, #D9AE45); border-color: #F2CF6E;
-    box-shadow: 0 4px 18px rgba(235, 195, 94, 0.25);
+    background: linear-gradient(180deg, #6FE3C1, #22A883); border-color: #6FE3C1;
+    box-shadow: 0 4px 18px rgba(52, 201, 160, 0.25);
 }
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"][aria-selected="true"] p {
-    color: #0B1220;
+    color: #0A0F1C;
 }
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] .react-aria-SelectionIndicator { display: none; }
 @media (max-width: 760px) {
@@ -232,7 +236,7 @@ izquierda) con el activo de su **columna** (nombre abajo).
 - **La diagonal** (de arriba-izquierda a abajo-derecha) cruza cada activo **consigo mismo**.
 - **Fuera de la diagonal** está cada **pareja** de activos. La tabla es un espejo: {a} con {b} vale lo mismo que {b}
   con {a}.
-- **La barra de color** de la derecha es la escala: **arriba = valores altos** (más dorado), **abajo = valores bajos**
+- **La barra de color** de la derecha es la escala: **arriba = valores altos** (más verde), **abajo = valores bajos**
   (oscuro y, en la correlación, azul si es negativo).
 
 **Covarianza (gráfica izquierda)** — mide si dos activos se mueven **en la misma dirección** y con qué fuerza.
@@ -244,7 +248,7 @@ izquierda) con el activo de su **columna** (nombre abajo).
 
 **Correlación (gráfica derecha)** — es la covarianza "normalizada": covarianza / (volatilidad 1 × volatilidad 2).
 Siempre está entre **−1 y +1**.
-- **+1 (dorado):** se mueven exactamente igual → no hay diversificación.
+- **+1 (verde):** se mueven exactamente igual → no hay diversificación.
 - **0 (oscuro):** no hay relación lineal → buena diversificación.
 - **−1 (azul):** se mueven exactamente al revés → uno compensa al otro.
 - La diagonal siempre vale 1 (un activo se mueve igual que sí mismo).
@@ -263,8 +267,8 @@ def _heatmap(matrix: pd.DataFrame, title: str, zmid=None, fmt=".2f"):
     z = matrix.to_numpy()
     fig = go.Figure(go.Heatmap(
         z=z, x=list(matrix.columns), y=list(matrix.index), zmid=zmid,
-        colorscale=([[0, "#2DE1FC"], [0.5, "#1A1F2B"], [1, "#EBC35E"]] if zmid is not None
-                    else [[0, "#1A1F2B"], [1, "#EBC35E"]]),
+        colorscale=([[0, "#6AA8FF"], [0.5, "#121A2B"], [1, "#34C9A0"]] if zmid is not None
+                    else [[0, "#121A2B"], [1, "#34C9A0"]]),
         hoverongaps=False,
     ))
     if len(matrix) <= 12:
@@ -283,7 +287,7 @@ def _heatmap(matrix: pd.DataFrame, title: str, zmid=None, fmt=".2f"):
                 p_ = pos(v)
                 dark = p_ > 0.7 or (zmid is not None and p_ < 0.2)
                 fig.add_annotation(x=col, y=row, text=f"<b>{format(v, fmt)}</b>", showarrow=False,
-                                   font=dict(color="#0B1220" if dark else "#E6E6E6", size=14))
+                                   font=dict(color="#0A0F1C" if dark else "#E8EDF6", size=14))
     fig.update_layout(title=title, height=420 if len(matrix) > 6 else 320, **LAYOUT)
     # Se lee como una tabla: el primer activo arriba, así la diagonal va de arriba-izquierda a abajo-derecha.
     fig.update_yaxes(autorange="reversed")
@@ -662,7 +666,7 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None
         )
 
     _explain("¿Qué significa cada cartera y cada línea?", """
-- **Frontera eficiente (dorada):** para cada rendimiento objetivo, la cartera de **menor riesgo posible** dentro de las
+- **Frontera eficiente (verde):** para cada rendimiento objetivo, la cartera de **menor riesgo posible** dentro de las
   reglas de pesos. Se calcula resolviendo una optimización por cada punto, no con la nube de puntos.
 - **Frontera no eficiente (azul punteada):** la parte de abajo de la curva: mismo riesgo pero **menos** rendimiento.
   Nadie racional elegiría esas carteras; se muestra para entender la forma completa.
@@ -1540,8 +1544,7 @@ sector).
     st.markdown("#### Módulos del laboratorio")
     st.caption("Elige un módulo; los supuestos de arriba aplican a todos.")
     with st.container(key="lab_nav"):
-        tabs = st.tabs(["Riesgo conjunto", "Estrés y estimadores", "Markowitz y fronteras", "Black-Litterman",
-                        "Rebalanceo", "Backtest", "Beta, CAPM y valoración", "Exportar"])
+        tabs = st.tabs(LAB_MODULES)
     results = None
     with tabs[0]:
         w_test = _tab_risk(lab)
