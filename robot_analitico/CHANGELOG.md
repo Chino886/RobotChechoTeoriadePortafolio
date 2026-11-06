@@ -19,6 +19,11 @@ Formato basado en *Keep a Changelog*. Versiones: `MAYOR.MENOR.PARCHE`.
   límites, ficha del producto, matriz de evolución, anexo con cálculos contrastables), hojas de decisiones del equipo.
 
 ### Cambiado
+- Interfaz pensada para alguien sin formación financiera: las explicaciones pasan de desplegables a signos de
+  interrogación (?) con texto muy sencillo (`ayuda.py`); Inicio con guía de 5 pasos; pestaña **Tickers** con el
+  directorio de empresas y fondos de EE. UU. (NASDAQ Trader) y botón para usar el ticker en Preselección.
+- Noticias en Inicio (economía de la semana y la empresa elegida, solo de los últimos 7 días y con enlaces que abren);
+  se quitaron los hitos históricos y la barra lateral de noticias (la barra lateral empieza cerrada).
 - La conversión de moneda de la Comparación usa el último dato FX disponible en o antes de cada fecha (sin look-ahead).
 - Tema visual: acento dorado, sin íconos en títulos.
 

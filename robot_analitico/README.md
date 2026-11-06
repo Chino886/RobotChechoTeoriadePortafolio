@@ -171,6 +171,8 @@ src/trace.py # v2: traza de ejecución y verificación de la exportación
 src/rates.py # tasas de bonos del gobierno por país (FRED: OCDE a 10 años, FMI y búsqueda por nombre)
 src/news_links.py # verificación de enlaces de noticias
 src/connectivity.py # comprobación de conexiones reales (evidencia P2-3)
+src/tickers.py # directorio de tickers (NASDAQ Trader, sin clave) y búsqueda
+ayuda.py # textos de ayuda en lenguaje sencillo (signos de interrogación)
 src/risk_extras.py # pérdida esperada (ES) del modelo lognormal de la v1
 src/performance.py # Sharpe, Treynor, alfa de Jensen, error de seguimiento, razón de información, CAPM
 src/factsheet.py # ficha técnica con la estructura del Anexo 6 de la SFC (simulación)
