@@ -136,7 +136,7 @@ src/market.py # v2: cotización en línea (barras de 1 minuto) con antigüedad d
 src/backtest.py # v2: evaluación walk-forward de estrategias (sin look-ahead)
 src/stress.py # v2: escenarios de estrés, escenario inverso, VaR y concentración
 src/estimators.py # v2: covarianza Ledoit-Wolf y EWMA
-src/data_quality.py # v2: calendario y huecos, barras completas, conversión a COP
+src/data_quality.py # v2: calendario y huecos, barras completas, FX sin look-ahead y conversión USD↔COP (USDCOP=X)
 src/trace.py # v2: traza de ejecución y verificación de la exportación
 src/rates.py # tasas de bonos del gobierno por país (FRED: OCDE a 10 años, FMI y búsqueda por nombre)
 src/news_links.py # verificación de enlaces de noticias

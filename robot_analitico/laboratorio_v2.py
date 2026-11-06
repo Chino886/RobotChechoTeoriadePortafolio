@@ -25,6 +25,7 @@ from src.capm import (
     cost_of_equity,
     discounted_cash_flow,
     nominal_rate_to_other_currency,
+    portfolio_beta,
     relever_beta,
     sml_required_return,
     unlever_beta,
@@ -33,7 +34,14 @@ from src.capm import (
 from src.backtest import ALL_STRATEGIES, ESTIMATORS, BacktestConfig, select_by_validation, walk_forward
 from src.charts import DARK_LAYOUT, ELECTRIC_BLUE, ACCENT_GOLD, STAR_WHITE
 from src.data import fetch_asset_data, resample_prices
-from src.data_quality import calendar_report, gap_safe_simple_returns, last_bar_age
+from src.data_quality import (
+    FX_TICKER_COP_PER_USD,
+    SUPPORTED_BASES,
+    calendar_report,
+    convert_prices_base,
+    gap_safe_simple_returns,
+    last_bar_age,
+)
 from src.estimators import ewma_covariance, ledoit_wolf
 from src.market import fetch_quotes, format_age
 from src.portfolio import (
@@ -93,7 +101,7 @@ class LabData:
     """mu y Sigma en la frecuencia nativa, más la muestra de retornos si existe."""
 
     def __init__(self, source, mu, sigma, periods_per_year, returns=None, n_before=None, label="",
-                 frequency=None, calendar=None, gap_removed=0, last_date=None):
+                 frequency=None, calendar=None, gap_removed=0, last_date=None, currency=None, fx_note=None):
         self.source = source
         self.mu = mu
         self.sigma = sigma
@@ -105,6 +113,8 @@ class LabData:
         self.calendar = calendar
         self.gap_removed = gap_removed
         self.last_date = last_date
+        self.currency = currency  # moneda base de los precios (None = sin moneda: caso docente o sintético)
+        self.fx_note = fx_note  # cómo se convirtió a la moneda base, si hubo conversión
 
 
 def _load_lab_data(source: str):
@@ -124,6 +134,37 @@ def _load_lab_data(source: str):
         f"Precios de cierre ajustado (auto_adjust=True: incluye dividendos y splits) de la sección Comparación: "
         f"frecuencia {result.frequency}, moneda {result.base_currency}, {result.common_start.date()} a {result.common_end.date()}."
     ), result.frequency
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fx_cop_per_usd(start, end) -> pd.Series:
+    """COP por 1 USD (USDCOP=X, Yahoo Finance) entre esas fechas; vacía si no hay dato."""
+    data = fetch_asset_data(FX_TICKER_COP_PER_USD, start, end)
+    if not data.ok or data.prices is None:
+        return pd.Series(dtype=float)
+    fx = data.prices["adjusted_close"].copy()
+    if fx.index.tz is not None:
+        fx.index = fx.index.tz_localize(None)
+    return fx
+
+
+def _to_base_currency(prices: pd.DataFrame, from_ccy: str, base: str) -> "tuple[pd.DataFrame, str]":
+    """Pasa los precios de la Comparación a la moneda base elegida; devuelve (precios, nota para pantalla y traza)."""
+    if from_ccy == base:
+        return prices, f"Precios en {base} tal como vienen de la Comparación (sin conversión)."
+    if from_ccy not in SUPPORTED_BASES:
+        raise ValueError(f"La Comparación está en {from_ccy}; solo se convierte entre USD y COP.")
+    start = prices.index.min() - pd.Timedelta(days=10)  # margen para tener un FX previo al primer precio
+    fx = _fx_cop_per_usd(start, prices.index.max() + pd.Timedelta(days=1))
+    if fx.empty:
+        raise ValueError(f"No se pudo descargar {FX_TICKER_COP_PER_USD} de Yahoo Finance para convertir a {base}.")
+    out, dropped = convert_prices_base(prices, from_ccy, base, fx)
+    op = "P_COP = P_USD · FX" if base == "COP" else "P_USD = P_COP / FX"
+    note = (f"Convertido {from_ccy} → {base} con {FX_TICKER_COP_PER_USD} (COP por USD): {op}, con el último FX "
+            f"publicado en o antes de cada fecha; así 1 + R_COP = (1 + R_USD)(1 + R_FX).")
+    if dropped:
+        note += f" Se descartaron {dropped} fecha(s) sin FX previo."
+    return out, note
 
 
 def _from_prices(source, prices, m, label, assets, frequency):
@@ -1133,7 +1174,106 @@ def _tab_backtest(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None)
 """)
 
 
-def _tab_capm(lab: LabData):
+def _benchmark_returns(lab: LabData, bench: str) -> "pd.Series | None":
+    """Rendimientos simples del benchmark en la frecuencia y la moneda base del laboratorio."""
+    result = st.session_state.get("comparison_result")
+    asset = fetch_asset_data(bench, result.common_start, result.common_end + pd.Timedelta(days=1))
+    if not asset.ok:
+        st.error(f"{bench}: {asset.error}")
+        return None
+    prices = resample_prices(asset.prices, result.frequency)[["adjusted_close"]]
+    if prices.index.tz is not None:
+        prices.index = prices.index.tz_localize(None)
+    bench_ccy = str(asset.currency or lab.currency or "USD").upper()
+    if lab.currency and bench_ccy != lab.currency:
+        try:
+            prices, note = _to_base_currency(prices, bench_ccy, lab.currency)
+        except ValueError as exc:
+            st.error(f"El benchmark está en {bench_ccy} y la cartera en {lab.currency}: {exc}")
+            return None
+        st.caption(f"Benchmark: {note}")
+    return prices["adjusted_close"].pct_change(fill_method=None)
+
+
+def _market_betas(lab: LabData, results):
+    """Betas de los activos reales (OLS y Cov/Var), beta de cada cartera y Hamada sobre un activo."""
+    st.markdown("#### Beta de los activos frente a un benchmark")
+    bench = st.text_input("Ticker del benchmark (decisión del equipo; ej. ^GSPC, ^COLCAP)", value="", key="lab_beta_bench")
+    if not bench.strip():
+        return
+    mret = _benchmark_returns(lab, bench.strip())
+    if mret is None:
+        return
+    fits = {a: beta_ols(lab.returns[a], mret) for a in lab.returns.columns}
+    table = pd.DataFrame({
+        "beta (OLS)": {a: f.beta for a, f in fits.items()},
+        "beta (Cov/Var)": {a: f.beta_cov_ratio for a, f in fits.items()},
+        "diferencia": {a: f.beta - f.beta_cov_ratio for a, f in fits.items()},
+        "alfa (por periodo)": {a: f.alpha for a, f in fits.items()},
+        "EE": {a: f.std_error for a, f in fits.items()},
+        "R²": {a: f.r_squared for a, f in fits.items()},
+        "n": {a: f.n for a, f in fits.items()},
+        "estado": {a: f.status for a, f in fits.items()},
+    })
+    table.index.name = "activo"
+    st.dataframe(table.style.format({"beta (OLS)": "{:.4f}", "beta (Cov/Var)": "{:.4f}", "diferencia": "{:.1e}",
+                                     "alfa (por periodo)": "{:.6f}", "EE": "{:.3f}", "R²": "{:.2f}"}, na_rep="—"))
+    st.caption(f"Beta frente a {bench.strip().upper()} en {lab.currency or 'la moneda de la Comparación'} (sensibilidad a esa "
+               "referencia, no automáticamente al «mercado» teórico). La beta sale por dos caminos —pendiente de la regresión "
+               "OLS y Cov(activo, benchmark)/Var(benchmark)— que deben coincidir (P2-31); la columna «diferencia» lo muestra. "
+               "rf = 0 en esta tabla porque se usa la misma muestra para todos.")
+
+    ok = {a: f.beta for a, f in fits.items() if f.status == "ok"}
+    betas = pd.Series(ok, dtype=float)
+
+    st.markdown("**Beta de cada cartera (suma ponderada de las betas de arriba)**")
+    if not results:
+        st.info("Abre el módulo «Markowitz y fronteras» para calcular las carteras.")
+    else:
+        names = {"gmv": "Mínima varianza (GMV)", "tangent": "Tangente (máximo Sharpe)", "personal": "Óptimo personal",
+                 "top": "Máximo rendimiento esperado"}
+        rows = []
+        for key, name in names.items():
+            res = results.get(key)
+            if res is None or not res.ok:
+                rows.append({"cartera": name, "beta de cartera": None, "nota": "sin cartera válida"})
+                continue
+            try:
+                rows.append({"cartera": name, "beta de cartera": portfolio_beta(res.weights, betas), "nota": ""})
+            except ValueError as exc:
+                rows.append({"cartera": name, "beta de cartera": None, "nota": str(exc)})
+        st.dataframe(pd.DataFrame(rows).style.format({"beta de cartera": "{:.4f}"}, na_rep="—"), hide_index=True)
+        st.caption("β_cartera = Σ wᵢ βᵢ (guía, sección 8; P102 y P104). Solo vale si todas las betas salen de la misma muestra, "
+                   "el mismo benchmark y la misma convención de rendimientos, como en esta tabla; si se cambia alguno, hay "
+                   "que recalcular todas.")
+
+    st.markdown("**Hamada sobre un activo real: desapalancar y reapalancar**")
+    if betas.empty:
+        st.info("Ningún activo tiene beta calculable con este benchmark.")
+        return
+    c1, c2, c3, c4, c5 = st.columns(5)
+    asset = c1.selectbox("Activo", list(betas.index), key="lab_hamada_asset")
+    de_now = c2.number_input("D/E actual (decisión del equipo)", value=0.0, min_value=0.0, step=0.05, format="%.4f",
+                             key="lab_hamada_de", help="Deuda/patrimonio actual de esa empresa, de sus estados financieros.")
+    tax = c3.number_input("Impuesto (decisión del equipo)", value=0.0, min_value=0.0, max_value=1.0, step=0.01,
+                          format="%.4f", key="lab_hamada_tax", help="Tasa marginal de impuestos de esa empresa (0,35 = 35 %).")
+    beta_d = c4.number_input("Beta de la deuda (decisión del equipo)", value=0.0, step=0.05, format="%.4f",
+                             key="lab_hamada_bd", help="0 = la deuda no tiene riesgo sistemático.")
+    de_target = c5.number_input("D/E objetivo (decisión del equipo)", value=0.0, min_value=0.0, step=0.05, format="%.4f",
+                                key="lab_hamada_target", help="Estructura de capital a la que se reapalanca.")
+    b_l = float(betas[asset])
+    b_u = unlever_beta(b_l, de_now, tax, beta_d)
+    b_new = relever_beta(b_u, de_target, tax, beta_d)
+    m1, m2, m3 = st.columns(3)
+    m1.metric(f"Beta observada de {asset} (βL)", f"{b_l:.4f}")
+    m2.metric("Beta desapalancada (βU)", f"{b_u:.4f}")
+    m3.metric(f"Beta reapalancada a D/E = {de_target:g}", f"{b_new:.4f}")
+    st.caption("βU = [βL + β_deuda·(1 − t)·D/E] / [1 + (1 − t)·D/E] y βL' = βU + (βU − β_deuda)·(1 − t)·D/E' (Hamada). "
+               "Los cuatro valores son del equipo y dependen de cada empresa: no se usan los del caso Alimentos. Con todo "
+               "en 0 la beta no cambia.")
+
+
+def _tab_capm(lab: LabData, results=None):
     params = _load_json("caso_alimentos_parametros.json")
     r = pd.read_csv(PAQUETE_DATA / "caso_alimentos_retornos.csv").set_index("anio")
     st.markdown(f"#### Caso docente congelado: {params['empresa']}")
@@ -1269,26 +1409,7 @@ def _tab_capm(lab: LabData):
         (st.success if chk.consistent else st.warning)(chk.message)
 
     if lab.source == SOURCE_MARKET and lab.returns is not None:
-        st.markdown("#### Beta de los activos frente a un benchmark")
-        bench = st.text_input("Ticker del benchmark (decisión del equipo; ej. ^GSPC, ^COLCAP)", value="", key="lab_beta_bench")
-        if bench.strip():
-            result = st.session_state.get("comparison_result")
-            asset = fetch_asset_data(bench, result.common_start, result.common_end + pd.Timedelta(days=1))
-            if not asset.ok:
-                st.error(f"{bench}: {asset.error}")
-            else:
-                prices = resample_prices(asset.prices, result.frequency)["adjusted_close"]
-                if prices.index.tz is not None:
-                    prices.index = prices.index.tz_localize(None)
-                mret = prices.pct_change(fill_method=None)
-                rows = []
-                for a in lab.returns.columns:
-                    b = beta_ols(lab.returns[a], mret)
-                    rows.append({"activo": a, "beta": b.beta, "EE": b.std_error, "R²": b.r_squared, "n": b.n, "estado": b.status})
-                betas = pd.DataFrame(rows).set_index("activo")
-                st.dataframe(betas.style.format({"beta": "{:.3f}", "EE": "{:.3f}", "R²": "{:.2f}"}, na_rep="—"))
-                st.caption(f"Beta frente a {bench.upper()} (sensibilidad a esa referencia, no automáticamente al «mercado» teórico); "
-                           "rf constante = 0 en esta tabla porque se usa la misma muestra para todos.")
+        _market_betas(lab, results)
 
     erp = params["erp_madura"]
     xs = np.linspace(0, 2, 20)
@@ -1321,8 +1442,10 @@ def _trace_context(lab: LabData) -> dict:
     ctx = {"frequency": lab.frequency or ("anual (parámetros dados)" if lab.m == 1 else None)}
     if lab.source == SOURCE_MARKET:
         result = st.session_state.get("comparison_result")
-        ctx.update(currency=getattr(result, "base_currency", None),
-                   source_fields=["Close con auto_adjust=True (cierre ajustado por dividendos y splits)"])
+        ctx.update(currency=lab.currency or getattr(result, "base_currency", None),
+                   source_fields=["Close con auto_adjust=True (cierre ajustado por dividendos y splits)"]
+                   + ([f"{FX_TICKER_COP_PER_USD} (COP por USD) para la moneda base"] if lab.currency and lab.fx_note
+                      and "Convertido" in lab.fx_note else []))
     elif lab.source == SOURCE_SYNTH:
         ctx.update(source_fields=["paquete_v2/data/precios_sinteticos_20.csv (columnas SIM1..SIM20)"])
     if lab.returns is not None:
@@ -1330,8 +1453,9 @@ def _trace_context(lab: LabData) -> dict:
             event_at=str(pd.Timestamp(lab.last_date).date()) if lab.last_date is not None else None,
             missing_data_rule=(f"Rendimientos simples sin rellenar huecos; los que cruzan un intervalo mayor al normal para la "
                                f"frecuencia {lab.frequency} se anulan ({lab.gap_removed}); luego máscara común de filas completas."),
-            transformations=["orden por fecha", "pct_change(fill_method=None) por activo", "anulación de rendimientos sobre huecos",
-                             "máscara común (dropna)", "media y covarianza muestral ddof=1"],
+            transformations=(["conversión a la moneda base: " + lab.fx_note] if lab.fx_note and "Convertido" in lab.fx_note else [])
+            + ["orden por fecha", "pct_change(fill_method=None) por activo", "anulación de rendimientos sobre huecos",
+               "máscara común (dropna)", "media y covarianza muestral ddof=1"],
         )
     triggers = st.session_state.get("lab_trigger_ids", [])
     if triggers:
@@ -1411,6 +1535,21 @@ solo cambia cuando la política del equipo lo indica.
             st.warning("**MODO LABORATORIO SINTÉTICO.** Series generadas para practicar: **no son cotizaciones reales**.")
         else:
             st.success("**MODO MERCADO.** Precios históricos de Yahoo Finance traídos en la sección Comparación.")
+        currency, fx_note = None, None
+        if source == SOURCE_MARKET:
+            from_ccy = str(getattr(st.session_state.get("comparison_result"), "base_currency", None) or "USD").upper()
+            currency = st.selectbox(
+                "Moneda base de la cartera (decisión del equipo)", list(SUPPORTED_BASES), index=0, key="lab_base_currency",
+                help="La moneda del mandato la decide el equipo. USD por defecto. Con COP, cada precio se convierte con "
+                     "USDCOP=X: P_COP = P_USD · FX, y los rendimientos quedan 1 + R_COP = (1 + R_USD)(1 + R_FX) (guía 3.2).")
+            try:
+                with st.spinner(f"Convirtiendo a {currency}..."):
+                    prices, fx_note = _to_base_currency(prices, from_ccy, currency)
+            except ValueError as exc:
+                st.error(str(exc))
+                return
+            label = f"{label} Moneda base: {currency}."
+            st.caption(f"**Moneda base: {currency}.** {fx_note}")
         all_assets = list(prices.columns)
         chosen = st.multiselect("Universo (decisión del equipo)", all_assets, default=all_assets, key=f"lab_universe_{source}")
         if len(chosen) < 2:
@@ -1421,6 +1560,7 @@ solo cambia cuando la política del equipo lo indica.
         except ValueError as exc:
             st.error(str(exc))
             return
+        lab.currency, lab.fx_note = currency, fx_note
     st.caption(lab.label + (" Frecuencia nativa: anual." if lab.m == 1 else f" Frecuencia nativa: {lab.m} periodos por año."))
 
     with st.container(border=True):
@@ -1556,6 +1696,6 @@ sector).
     with tabs[5]:
         _tab_backtest(lab, rf_ea, gamma, bounds, groups)
     with tabs[6]:
-        _tab_capm(lab)
+        _tab_capm(lab, results)
     with tabs[7]:
         _tab_export(lab, rf_ea, gamma, bounds, groups, results)
