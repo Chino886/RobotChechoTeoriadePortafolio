@@ -56,7 +56,10 @@ def test_simple_interface_tickers_tab_news_home_and_tooltips(monkeypatch):
     import src.tickers
     from streamlit.testing.v1 import AppTest
 
+    import streamlit as st
+
     monkeypatch.setattr(src.tickers.requests, "get", _Http().get)
+    st.cache_data.clear()  # otra prueba pudo dejar en caché el directorio real (en CI hay red)
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=180)
     at.session_state["intro_ack"] = True
     at.session_state["terms_accepted"] = True
