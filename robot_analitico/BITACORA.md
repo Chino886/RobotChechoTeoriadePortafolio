@@ -14,6 +14,9 @@ Corrección y validación de cada integrante:
 Prueba, comando, resultado, snapshot y commit:
 Revisión cruzada y defensa pendiente:
 
+Para preparar cada entrada: `decisiones/MANDATO_EQUIPO.md` (decisiones pendientes),
+`decisiones/CALCULO_MANUAL_DOS_ACTIVOS.md` (cálculo a mano) y `decisiones/REPRODUCCION_P2-36.md`.
+
 ## Entradas
 
 (sin entradas todavía)

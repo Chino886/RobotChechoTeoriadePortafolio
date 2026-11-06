@@ -39,7 +39,9 @@ entregable sigue siendo el del título de este README.
 ## Mandato del equipo (v2)
 
 _Formato de `paquete_v2/plantillas/DECISION_Y_APRENDIZAJE.md`. Lo completa el
-equipo: la IA no llena estas decisiones._
+equipo: la IA no llena estas decisiones. Para prepararlas, usen la hoja
+`decisiones/MANDATO_EQUIPO.md` (qué es cada decisión, dónde se usa en el bot y
+qué preguntas del banco la sustentan)._
 
 - Usuario y decisión: _pendiente (decisión del equipo)_
 - Ruta principal y necesidad: _pendiente (decisión del equipo)_
@@ -136,6 +138,11 @@ src/stress.py # v2: escenarios de estrés, escenario inverso, VaR y concentraci�
 src/estimators.py # v2: covarianza Ledoit-Wolf y EWMA
 src/data_quality.py # v2: calendario y huecos, barras completas, conversión a COP
 src/trace.py # v2: traza de ejecución y verificación de la exportación
+src/rates.py # tasas de bonos del gobierno por país (FRED: OCDE a 10 años, FMI y búsqueda por nombre)
+src/news_links.py # verificación de enlaces de noticias
+src/connectivity.py # comprobación de conexiones reales (evidencia P2-3)
+decisiones/ # hojas que llena el equipo: mandato, cálculo a mano, reproducción P2-36, copias de plantillas
+scripts/verify_package.py # comprueba paquete_v2/ contra su manifiesto SHA256
 requirements-lock.txt # versiones exactas con las que se ejecutaron las pruebas
 laboratorio_v2.py # v2: interfaz del laboratorio de portafolios
 paquete_v2/ # material docente v2 (no se modifica; verificado con su manifiesto SHA256)

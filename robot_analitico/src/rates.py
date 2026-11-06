@@ -247,3 +247,11 @@ def _neg(date_str: str) -> int:
         return -pd.Timestamp(date_str).value
     except (ValueError, TypeError):
         return 0
+
+
+def ping_fred(api_key: str, http=requests) -> int:
+    """Consulta mínima a FRED para comprobar la conexión: devuelve cuántas series encuentra."""
+    params = {"search_text": "government bond yield", "api_key": api_key, "file_type": "json", "limit": 1}
+    response = http.get(f"{FRED_BASE_URL}/series/search", params=params, timeout=15)
+    response.raise_for_status()
+    return int(response.json().get("count", 0) or 0)
