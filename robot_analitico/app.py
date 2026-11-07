@@ -49,7 +49,8 @@ from src.rates import fetch_bond_series, list_long_term_yield_countries, ping_fr
 from laboratorio_v2 import LAB_MODULES, render_portfolio_lab
 from html import escape as html_escape
 
-from src.ui_fx import apply_ui_fx, empty_state_html, icon, news_carousel_html, section_label_html
+from src.ui_fx import (apply_ui_fx, empty_state_html, icon, news_carousel_html, page_header_html,
+                       section_label_html)
 from src.news_links import verify_items
 from src.forecasting import (
     FORECAST_MODELS,
@@ -1937,41 +1938,132 @@ def _use_ticker(ticker: str) -> None:
     st.session_state["ticker_chosen_msg"] = ticker
 
 
+TICKER_TABLE_ROWS = 300  # filas que se muestran (igual que antes)
+_TYPE_STYLE = {"Acción": ("stock", "chart"), "Fondo (ETF)": ("etf", "layers")}
+
+
+def _ticker_avatar(ticker: str) -> str:
+    """Ícono genérico con la inicial del ticker (no es el logo de la empresa: no se inventan identidades)."""
+    hue = sum(ord(c) for c in ticker) % 3  # tres tonos de la paleta, siempre el mismo para el mismo ticker
+    return f'<span class="tk-av h{hue}" aria-hidden="true">{html_escape(ticker[:1] or "?")}</span>'
+
+
+def _tickers_table_html(rows: pd.DataFrame, selected: "str | None") -> str:
+    """Tabla del screener: mismas columnas y datos de la búsqueda (ticker, empresa, bolsa, tipo)."""
+    body = []
+    for i, (t, e, b, k) in enumerate(zip(rows["ticker"], rows["empresa"], rows["bolsa"], rows["tipo"])):
+        cls, ic = _TYPE_STYLE.get(k, ("other", "tag"))
+        on = ' class="on" aria-selected="true"' if t == selected else ""
+        delay = f' style="animation-delay:{min(i, 24) * 0.018:.3f}s"'
+        body.append(
+            f'<tr{on}{delay} data-t="{html_escape(t)}"><td class="n">{i + 1}</td>'
+            f'<td class="tk">{_ticker_avatar(t)}<b>{html_escape(t)}</b></td>'
+            f'<td class="em">{html_escape(e)}</td>'
+            f'<td><span class="tk-ex">{html_escape(b)}</span></td>'
+            f'<td><span class="tk-type {cls}">{icon(ic, 13)}{html_escape(k)}</span></td></tr>'
+        )
+    head = ('<thead><tr><th class="n">#</th><th data-sort="1">Ticker</th><th data-sort="2">Empresa</th>'
+            '<th data-sort="3">Bolsa</th><th data-sort="4">Tipo</th></tr></thead>')
+    return f'<div class="tk-table" role="region" aria-label="Resultados de la búsqueda"><table>{head}<tbody>{"".join(body)}</tbody></table></div>'
+
+
+def _tickers_options_html(found: pd.DataFrame, complete: bool, n_directory: int) -> str:
+    """Panel desplegable de opciones: fuente del directorio, tipos y bolsas de los resultados actuales."""
+    source = (f"{n_directory:,} empresas y fondos · directorio público de NASDAQ Trader (diario)" if complete
+              else "Lista corta de empresas conocidas (no se pudo cargar el directorio completo)")
+    by_ex = found["bolsa"].value_counts() if not found.empty else pd.Series(dtype=int)
+    by_type = found["tipo"].value_counts() if not found.empty else pd.Series(dtype=int)
+    ex_rows = "".join(f'<li><span class="tk-ex">{html_escape(str(ex))}</span><b>{int(c):,}</b></li>' for ex, c in by_ex.items())
+    ty_rows = "".join(
+        f'<li><span class="tk-type {_TYPE_STYLE.get(str(k), ("other", "tag"))[0]}">'
+        f'{icon(_TYPE_STYLE.get(str(k), ("other", "tag"))[1], 13)}{html_escape(str(k))}</span><b>{int(c):,}</b></li>'
+        for k, c in by_type.items())
+    return (
+        '<details class="tk-opts"><summary>' + icon("sliders", 15) + '<span>Opciones</span></summary>'
+        '<div class="tk-opts-panel">'
+        f'<div class="og"><div class="ot">Fuente del directorio</div><div class="ob">{html_escape(source)}</div></div>'
+        f'<div class="og"><div class="ot">Tipo de activo en los resultados</div><ul>{ty_rows or "<li>—</li>"}</ul></div>'
+        f'<div class="og"><div class="ot">Bolsa en los resultados</div><ul>{ex_rows or "<li>—</li>"}</ul></div>'
+        '</div></details>'
+    )
+
+
 def render_tickers_page() -> None:
-    _page_title("Tickers", "Busca el código de cualquier empresa para usarlo en el bot.")
+    st.markdown(page_header_html("Screener de empresas", "Tickers",
+                                 "Busca el código de cualquier empresa para usarlo en el bot.", "tag"),
+                unsafe_allow_html=True)
     st.markdown("**¿Qué es un ticker?**", help=(
         "Es el **nombre corto** con el que una empresa aparece en la bolsa de valores.\n\n"
         "- Apple → **AAPL**\n- Coca-Cola → **KO**\n- Ecopetrol (en Nueva York) → **EC**\n\n"
         "El bot necesita ese código para buscar los precios de la empresa."))
     with st.spinner("Cargando el directorio de empresas..."):
         directory, complete = _ticker_directory()
-    if complete:
-        st.caption(f"{len(directory):,} empresas y fondos de las bolsas de Estados Unidos (directorio público de "
-                   "NASDAQ Trader, se actualiza cada día).")
-    else:
-        st.warning("No se pudo cargar el directorio completo en este momento; se muestra una lista corta de empresas "
-                   "conocidas.")
-    c1, c2 = st.columns([3, 1])
-    text = c1.text_input("Escribe el nombre de la empresa o su ticker", placeholder="Ej: coca cola, apple, tesla",
-                         key="ticker_search")
-    kind = c2.selectbox("Tipo", ["Todos", "Acción", "Fondo (ETF)"], key="ticker_kind", help=(
-        "- **Acción:** una parte de una empresa.\n- **Fondo (ETF):** una canasta de muchas acciones que se "
-        "compra como si fuera una sola."))
-    found = search_tickers(directory, text, kind)
-    st.dataframe(found.head(300), hide_index=True, height=320,
-                 column_config={"ticker": "Ticker", "empresa": "Empresa", "bolsa": "Bolsa", "tipo": "Tipo"})
-    st.caption(f"{len(found):,} resultado(s)" + (" · se muestran los primeros 300" if len(found) > 300 else ""))
-    if not found.empty:
-        options = found.head(300)
-        labels = [f"{t} — {e}" for t, e in zip(options["ticker"], options["empresa"])]
-        pick = st.selectbox("Escoge una empresa", labels, key="ticker_pick")
-        ticker = options["ticker"].iloc[labels.index(pick)]
-        st.button(f"Usar {ticker} en Preselección de activos", type="primary", on_click=_use_ticker, args=(ticker,),
-                  key="ticker_use")
-    chosen = st.session_state.pop("ticker_chosen_msg", None)
-    if chosen:
-        st.success(f"Listo: **{chosen}** quedó escrito en **Preselección de activos** → Datos del activo. Ve a esa "
-                   "pestaña y pulsa «Descargar y limpiar».")
+
+    left, main = st.columns([1, 2.6], gap="medium")
+    with left:
+        with st.container(key="tk_left"):
+            st.markdown(section_label_html("Buscar", "search"), unsafe_allow_html=True)
+            text = st.text_input("Escribe el nombre de la empresa o su ticker", placeholder="Ej: coca cola, apple, tesla",
+                                 key="ticker_search")
+            st.markdown(section_label_html("Filtros", "sliders"), unsafe_allow_html=True)
+            kind = st.selectbox("Tipo", ["Todos", "Acción", "Fondo (ETF)"], key="ticker_kind", help=(
+                "- **Acción:** una parte de una empresa.\n- **Fondo (ETF):** una canasta de muchas acciones que se "
+                "compra como si fuera una sola."))
+            found = search_tickers(directory, text, kind)
+            chips = []
+            if (text or "").strip():
+                chips.append(f'{icon("search", 12)}«{html_escape(text.strip())}»')
+            if kind != "Todos":
+                chips.append(f'{icon("sliders", 12)}{html_escape(kind)}')
+            st.markdown(
+                f'<div class="tk-count"><span class="v">{len(found):,}</span><span class="l">resultado(s)</span>'
+                + (f'<div class="tk-chips"><span class="lab">Filtros activos</span>'
+                   + "".join(f'<span class="chip">{c}</span>' for c in chips) + "</div>" if chips
+                   else '<div class="tk-chips"><span class="lab">Sin filtros: todo el directorio</span></div>')
+                + "</div>", unsafe_allow_html=True)
+            if complete:
+                st.caption(f"{len(directory):,} empresas y fondos de las bolsas de Estados Unidos (directorio público de "
+                           "NASDAQ Trader, se actualiza cada día).")
+            else:
+                st.warning("No se pudo cargar el directorio completo en este momento; se muestra una lista corta de "
+                           "empresas conocidas.")
+            options = found.head(TICKER_TABLE_ROWS)
+            ticker = None
+            if not found.empty:
+                st.markdown(section_label_html("Seleccionar", "check"), unsafe_allow_html=True)
+                labels = [f"{t} — {e}" for t, e in zip(options["ticker"], options["empresa"])]
+                pick = st.selectbox("Escoge una empresa", labels, key="ticker_pick")
+                ticker = options["ticker"].iloc[labels.index(pick)]
+                st.button(f"Usar {ticker} en Preselección de activos", type="primary", on_click=_use_ticker,
+                          args=(ticker,), key="ticker_use", use_container_width=True)
+            chosen = st.session_state.pop("ticker_chosen_msg", None)
+            if chosen:
+                st.success(f"Listo: **{chosen}** quedó escrito en **Preselección de activos** → Datos del activo. Ve a "
+                           "esa pestaña y pulsa «Descargar y limpiar».")
+    with main:
+        with st.container(key="tk_main"):
+            more = f" · se muestran los primeros {TICKER_TABLE_ROWS}" if len(found) > TICKER_TABLE_ROWS else ""
+            st.markdown(
+                f'<div class="tk-bar"><div><span class="v">{len(found):,}</span> resultado(s){more}</div>'
+                f'{_tickers_options_html(found, complete, len(directory))}</div>', unsafe_allow_html=True)
+            if found.empty:
+                st.markdown(empty_state_html("search", "No hay empresas con esa búsqueda",
+                                             "Prueba con otra palabra, con el ticker (por ejemplo <b>AAPL</b>) o cambia "
+                                             "el filtro de <b>Tipo</b> a «Todos»."), unsafe_allow_html=True)
+            else:
+                st.markdown(_tickers_table_html(options, ticker), unsafe_allow_html=True)
+                if ticker:
+                    row = options[options["ticker"] == ticker].iloc[0]
+                    cls, ic = _TYPE_STYLE.get(row["tipo"], ("other", "tag"))
+                    st.markdown(
+                        f'<div class="tk-sel">{_ticker_avatar(ticker)}<div class="sx"><div class="st">Empresa seleccionada'
+                        f'</div><div class="sn"><b>{html_escape(ticker)}</b> {html_escape(row["empresa"])}</div></div>'
+                        f'<span class="tk-ex">{html_escape(row["bolsa"])}</span>'
+                        f'<span class="tk-type {cls}">{icon(ic, 13)}{html_escape(row["tipo"])}</span></div>',
+                        unsafe_allow_html=True)
+                with st.expander("Ver como tabla de datos (ordenar, buscar dentro y descargar)", icon=":material/table:"):
+                    st.dataframe(options, hide_index=True, height=320,
+                                 column_config={"ticker": "Ticker", "empresa": "Empresa", "bolsa": "Bolsa", "tipo": "Tipo"})
 
 
 def _command_items() -> "list[dict]":
