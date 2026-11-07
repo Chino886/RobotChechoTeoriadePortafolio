@@ -34,7 +34,13 @@ _template.layout = go.Layout(
     hoverlabel=dict(bgcolor="#121A2B", bordercolor=ACCENT_EMERALD,
                     font=dict(family="Geist Mono, monospace", color="#E8EDF6")),
 )
+# Línea guía vertical al pasar el cursor (todas las gráficas).
+_template.layout.xaxis.update(showspikes=True, spikemode="across", spikesnap="cursor", spikethickness=1,
+                              spikecolor="rgba(111, 227, 193, 0.45)", spikedash="dot")
+_template.data.scatter = [go.Scatter(line=dict(width=2.2))]
 pio.templates["dpst"] = _template
+
+PRESELECTION_CHART_HEIGHT = 460  # precio, rendimientos y pronóstico: gráficas más grandes
 
 DARK_LAYOUT = dict(
     template="plotly_dark+dpst",
@@ -54,6 +60,8 @@ def price_chart(prices, ticker: str, currency: str, frequency: str, source: str)
         xaxis_title="Fecha",
         yaxis_title=f"Precio ajustado ({currency or 'N/D'})",
         margin=dict(t=60, b=40, l=40, r=20),
+        height=PRESELECTION_CHART_HEIGHT,
+        hovermode="x unified",
         **DARK_LAYOUT,
     )
     return fig
@@ -69,6 +77,8 @@ def return_chart(returns, ticker: str, frequency: str) -> go.Figure:
         xaxis_title="Fecha",
         yaxis_title="g_t (log-rendimiento)",
         margin=dict(t=60, b=40, l=40, r=20),
+        height=PRESELECTION_CHART_HEIGHT,
+        hovermode="x unified",
         **DARK_LAYOUT,
     )
     return fig
@@ -119,6 +129,8 @@ def forecast_chart(prices, steps, ticker: str, frequency: str, history_window: i
         xaxis_title="Fecha",
         yaxis_title="Precio",
         margin=dict(t=60, b=40, l=40, r=20),
+        height=PRESELECTION_CHART_HEIGHT,
+        hovermode="x unified",
         **DARK_LAYOUT,
     )
     return fig
@@ -181,6 +193,7 @@ def risk_return_map(summaries, non_dominated, starred_ticker: "str | None" = Non
         xaxis_title="Volatilidad histórica anualizada (σ)",
         yaxis_title="Media histórica logarítmica anualizada (ḡ)",
         margin=dict(t=60, b=40, l=40, r=20),
+        height=PRESELECTION_CHART_HEIGHT,
         **DARK_LAYOUT,
     )
     return fig
