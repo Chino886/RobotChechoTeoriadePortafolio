@@ -47,7 +47,9 @@ from src.trace import git_commit
 from src.risk_extras import expected_shortfall_fraction
 from src.rates import fetch_bond_series, list_long_term_yield_countries, ping_fred, search_bond_series
 from laboratorio_v2 import LAB_MODULES, render_portfolio_lab
-from src.ui_fx import apply_ui_fx, news_carousel_html
+from html import escape as html_escape
+
+from src.ui_fx import apply_ui_fx, empty_state_html, icon, news_carousel_html, section_label_html
 from src.news_links import verify_items
 from src.forecasting import (
     FORECAST_MODELS,
@@ -1570,6 +1572,9 @@ ALPHA_VANTAGE_CACHE_TTL_SECONDS = 3 * 3600
 NEWS_PANEL_ITEMS = 15  # todas las que se muestran en la pantalla principal
 GENERAL_NEWS_QUERY = "economía mercados financieros bolsa de valores"
 GENERAL_NEWS_TOPIC = "economy_macro"  # un solo tema: varios a la vez se combinan como "Y"
+# Pestaña «Mercados» de Inicio: misma conexión de Google News, otra búsqueda. No usa Alpha Vantage
+# para no gastar su cupo diario gratuito.
+MARKETS_NEWS_QUERY = "bolsa de valores acciones Wall Street mercados"
 
 
 def _format_news_date(raw) -> str:
@@ -1610,6 +1615,25 @@ def get_google_news_rss(query: str, max_items: int = 5) -> "list[dict]":
         return []
 
 
+# Temas de Alpha Vantage (campo "topics" de cada noticia) en español, para la etiqueta de la tarjeta.
+AV_TOPIC_LABELS = {
+    "economy_macro": "Economía", "economy_monetary": "Política monetaria", "economy_fiscal": "Política fiscal",
+    "financial_markets": "Mercados", "finance": "Finanzas", "earnings": "Resultados", "ipo": "Salidas a bolsa",
+    "mergers_and_acquisitions": "Fusiones", "technology": "Tecnología", "energy_transportation": "Energía",
+    "manufacturing": "Industria", "real_estate": "Finca raíz", "retail_wholesale": "Comercio",
+    "life_sciences": "Salud", "blockchain": "Blockchain",
+}
+
+
+def _av_topic_label(topics) -> str:
+    """Tema más relevante de la noticia según Alpha Vantage; '' si no trae."""
+    try:
+        best = max(topics or [], key=lambda t: float(t.get("relevance_score", 0)))
+        return AV_TOPIC_LABELS.get(best.get("topic", ""), "")
+    except (ValueError, TypeError, AttributeError):
+        return ""
+
+
 @st.cache_data(ttl=ALPHA_VANTAGE_CACHE_TTL_SECONDS, show_spinner=False)
 def _fetch_alpha_vantage(tickers: "str | None", topics: "str | None", max_items: int) -> dict:
     """
@@ -1641,6 +1665,10 @@ def _fetch_alpha_vantage(tickers: "str | None", topics: "str | None", max_items:
             "link": item["url"],
             "publisher": item["source"],
             "published": item["time_published"],
+            # Campos que ya trae la misma respuesta; solo se muestran en la tarjeta de Inicio.
+            "summary": item.get("summary") or "",
+            "image": item.get("banner_image") or "",
+            "category": _av_topic_label(item.get("topics")),
         }
         for item in data["feed"][:max_items]
     ]
@@ -1669,12 +1697,17 @@ def _get_yfinance_news(ticker: str, max_items: int = 3) -> "list[dict]":
             link = (content.get("canonicalUrl") or {}).get("url")
             if not title or not link:
                 continue
+            thumb = content.get("thumbnail") or {}
+            resolutions = thumb.get("resolutions") or []
             items.append(
                 {
                     "title": title,
                     "link": link,
                     "publisher": (content.get("provider") or {}).get("displayName", "Yahoo Finance"),
                     "published": content.get("pubDate"),
+                    # Campos que ya trae la misma respuesta; solo se muestran en la tarjeta de Inicio.
+                    "summary": content.get("summary") or "",
+                    "image": thumb.get("originalUrl") or (resolutions[0].get("url") if resolutions else "") or "",
                 }
             )
         return items
@@ -1685,13 +1718,15 @@ def _get_yfinance_news(ticker: str, max_items: int = 3) -> "list[dict]":
 MILESTONE_TOP_MOVES = 3  # mayores subidas y caídas de un día que se listan
 
 
-def _collect_news(ticker: "str | None") -> "list[tuple[str, list[dict]]]":
+def _collect_news(ticker: "str | None", markets: bool = False) -> "list[tuple[str, list[dict]]]":
     """
     Noticias por fuente: del activo si se pasa un ticker, o generales de
     economía y mercados si no. Se pide siempre la cantidad del panel y el
     sidebar muestra solo las primeras, así ambas vistas comparten la misma
     consulta en caché (y no gastan cupo extra de Alpha Vantage).
     """
+    if markets:
+        return [("Google News", get_google_news_rss(MARKETS_NEWS_QUERY, max_items=NEWS_PANEL_ITEMS))]
     if ticker:
         return [
             ("Yahoo Finance", _get_yfinance_news(ticker, max_items=NEWS_PANEL_ITEMS)),
@@ -1711,7 +1746,8 @@ LINK_CHECK_EXTRA = 3  # se prueban algunos de más por fuente, por si varios est
 @st.cache_data(ttl=LINK_CHECK_TTL_SECONDS, show_spinner=False)
 def _verified_news(items: "tuple[tuple[str, str, str, str], ...]") -> "tuple[list[dict], list[dict]]":
     """Prueba los enlaces en paralelo (src/news_links.py) y separa los que abren de los que no."""
-    news = [{"title": t, "link": link, "publisher": pub, "published": when} for t, link, pub, when in items]
+    keys = ("title", "link", "publisher", "published", "summary", "image", "category")
+    news = [dict(zip(keys, item)) for item in items]  # tuplas de 4 (antes) o de 7 campos
     return verify_items(news, max_workers=16)
 
 
@@ -1730,17 +1766,18 @@ def _is_recent(raw, days: int = NEWS_MAX_AGE_DAYS) -> bool:
     return when >= pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=days)
 
 
-def _merged_recent_news(ticker: "str | None", limit: int) -> "tuple[list[dict], int]":
+def _merged_recent_news(ticker: "str | None", limit: int, markets: bool = False) -> "tuple[list[dict], int]":
     """Une las fuentes, quita repetidas y viejas, verifica enlaces y devuelve (noticias, ocultas)."""
     seen, pool = set(), []
-    for source, items in _collect_news(ticker):
+    for source, items in _collect_news(ticker, markets):
         for item in items:
             key = str(item.get("title", "")).strip().lower()
             if key and key not in seen and _is_recent(item.get("published")):
                 seen.add(key)
                 pool.append({**item, "source": source})
     candidates = tuple((str(i.get("title", "")), str(i.get("link", "")), str(i.get("publisher", "")),
-                        str(i.get("published", ""))) for i in pool[: limit + LINK_CHECK_EXTRA * 2])
+                        str(i.get("published", "")), str(i.get("summary", "") or ""), str(i.get("image", "") or ""),
+                        str(i.get("category", "") or "")) for i in pool[: limit + LINK_CHECK_EXTRA * 2])
     kept, hidden = _verified_news(candidates) if candidates else ([], [])
     return kept[:limit], len(hidden)
 
@@ -1761,7 +1798,8 @@ def _show_news(items: "list[dict]", hidden: int, empty_text: str) -> None:
 def _show_news_carousel(items: "list[dict]", hidden: int, empty_text: str, label: str) -> None:
     """Las mismas noticias de `_show_news`, en un recuadro grande que pasa solo (ver src/ui_fx.py)."""
     if not items:
-        st.info(empty_text)
+        st.markdown(empty_state_html("news", "Sin noticias por ahora", html_escape(empty_text) +
+                                     " Las fuentes se vuelven a consultar en unos minutos."), unsafe_allow_html=True)
         return
     st.markdown(news_carousel_html(items, label, _format_news_date), unsafe_allow_html=True)
     if hidden:
@@ -1770,6 +1808,9 @@ def _show_news_carousel(items: "list[dict]", hidden: int, empty_text: str, label
 
 def render_news_home() -> None:
     """Noticias de la semana en Inicio: economía en general y la empresa que se esté mirando."""
+    st.markdown('<div class="dpst-newshead"><div class="dpst-eyebrow">' + icon("news", 15) +
+                '<span>DPST FINANCIAL NEWS</span></div><div class="nh-title">Mercado en movimiento</div></div>',
+                unsafe_allow_html=True)
     st.markdown("#### Noticias de la semana", help=(
         "Noticias de los últimos 7 días, tomadas de Google News, Yahoo Finance y Alpha Vantage.\n\n"
         "- Solo aparecen las que tienen un enlace que **sí abre**.\n"
@@ -1777,14 +1818,22 @@ def render_news_home() -> None:
     try:
         result = st.session_state.get("asset_result")
         ticker = result.ticker if result is not None and result.ok else None
-        tab_general, tab_asset = st.tabs(["Economía", f"Empresa: {ticker}" if ticker else "Empresa"])
+        tab_general, tab_markets, tab_asset = st.tabs(
+            ["Economía", "Mercados", f"Empresa: {ticker}" if ticker else "Empresa"])
         with tab_general:
             with st.spinner("Buscando noticias..."):
                 items, hidden = _merged_recent_news(None, NEWS_HOME_ITEMS)
             _show_news_carousel(items, hidden, "No se encontraron noticias económicas en este momento.", "Economía")
+        with tab_markets:
+            with st.spinner("Buscando noticias de mercados..."):
+                items, hidden = _merged_recent_news(None, NEWS_HOME_ITEMS, markets=True)
+            _show_news_carousel(items, hidden, "No se encontraron noticias de mercados en este momento.", "Mercados")
         with tab_asset:
             if not ticker:
-                st.info("Escoge una empresa en **Preselección de activos** y aquí verás sus noticias.")
+                st.markdown(empty_state_html(
+                    "tag", "Elige una empresa",
+                    "Escoge una empresa en <b>Preselección de activos</b> y aquí verás sus noticias."),
+                    unsafe_allow_html=True)
             else:
                 with st.spinner(f"Buscando noticias de {ticker}..."):
                     items, hidden = _merged_recent_news(ticker, NEWS_HOME_ITEMS)
@@ -1994,53 +2043,221 @@ def _md_bold(text: str) -> str:
     return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
 
 
-def render_home(user_name: str, user_email: str) -> None:
-    """Portada: nombre del bot, alcance (solo preselección académica) y mapa de secciones."""
-    tape = "".join(f"<span>{item}</span>" for item in HERO_TAPE * 2)
-    st.markdown(
-        f'''<div class="dpst-hero">{_hero_spark_svg()}
-        <div class="copy">
-        <span class="dpst-pill">PRESELECCIÓN ACADÉMICA</span>
-        <div style="display:flex; align-items:center; gap:14px;">{_logo_svg(56, "logoGradHero")}<h1>{BRAND_NAME}</h1></div>
-        <div class="sub">{SYSTEM_NAME}</div>
-        <div class="meta">{TEAM_NAME} · {INSTITUTION} · Teoría Moderna de Portafolios · versión {VERSION}</div>
-        </div>
-        <div class="dpst-tape" aria-hidden="true"><div class="track">{tape}</div></div>
-        </div>''',
-        unsafe_allow_html=True,
+# Accesos rápidos de Inicio: pestaña de destino, ícono y descripción (los módulos no cambian).
+HOME_MODULES = [
+    ("Tickers", "tag", "Busca el código de cualquier empresa o fondo de las bolsas de EE. UU."),
+    ("Preselección de activos", "chart", "Descarga un activo, mira su historia, su pronóstico y compáralo con otros."),
+    ("Tasas soberanas", "landmark", "Tasas de los bonos del gobierno por país, desde FRED."),
+    (LAB_TITLE, "layers", "Arma carteras simuladas: Markowitz, Black-Litterman, rebalanceo y más."),
+]
+# Paso de la guía → (pestaña, desplegable que se abre, ícono, texto corto del botón).
+HOME_STEP_TARGETS = {
+    "1": ("Tickers", None, "search", "Ir a Tickers"),
+    "2": ("Preselección de activos", "Datos del activo a probar", "chart", "Ir a Datos del activo"),
+    "3": ("Preselección de activos", "Pronóstico", "trending", "Ir a Pronóstico"),
+    "4": ("Preselección de activos", "Comparación y preselección de activos", "scale", "Ir a Comparación"),
+    "5": (LAB_TITLE, None, "wallet", "Ir al Laboratorio"),
+}
+
+
+def _session_tickers() -> "list[str]":
+    """Activos que el usuario ya descargó en esta sesión (Datos del activo y Comparación)."""
+    seen = []
+    result = st.session_state.get("asset_result")
+    if result is not None and getattr(result, "ok", False):
+        seen.append(result.ticker)
+    comparison = st.session_state.get("comparison_result")
+    summaries = (getattr(comparison, "summaries", None) or []) if getattr(comparison, "ok", False) else []
+    for summary in summaries:
+        if summary.ticker not in seen:
+            seen.append(summary.ticker)
+    return seen
+
+
+def _configured_keys() -> "dict[str, bool]":
+    """Qué claves de API están configuradas en los secretos (no se muestran sus valores)."""
+    out = {}
+    for name, key in (("FRED", "FRED_API_KEY"), ("Alpha Vantage", "ALPHA_VANTAGE_API_KEY")):
+        try:
+            out[name] = bool(st.secrets.get(key))
+        except Exception:
+            out[name] = False
+    return out
+
+
+def _home_kpis_html() -> str:
+    """Indicadores de la portada. Solo información que ya existe en la app o en esta sesión."""
+    tickers = _session_tickers()
+    keys = _configured_keys()
+    log = st.session_state.get("conn_check_log") or []
+    if log:
+        last_time = str(log[-1].get("hora (UTC)", ""))
+        last_batch = [r for r in log if str(r.get("hora (UTC)", ""))[:16] == last_time[:16]] or log[-1:]
+        ok = sum(1 for r in last_batch if r.get("estado") == "conectado")
+        conn_value = f"{ok} / {len(last_batch)}"
+        conn_note = f"servicios conectados · última prueba {last_time[11:16]} UTC"
+        conn_tone = "good" if ok == len(last_batch) else "warn"
+    else:
+        n_keys = sum(keys.values())
+        conn_value = f"{n_keys} / {len(keys)}"
+        conn_note = "claves de API configuradas · " + " · ".join(
+            f"{name} {'✓' if has else '—'}" for name, has in keys.items())
+        conn_tone = "good" if n_keys == len(keys) else "warn"
+    commit = git_commit()
+    short = commit[:7] if commit and commit != "no disponible" else "N/D"
+    if tickers:
+        assets_note = ", ".join(tickers[:6]) + ("…" if len(tickers) > 6 else "")
+    else:
+        assets_note = "en esta sesión · descarga uno en Preselección"
+    tiles = [
+        ("database", "Activos analizados", str(len(tickers)), assets_note, "neutral"),
+        ("layers", "Modelos disponibles", str(len(HERO_TAPE)), f"en {len(LAB_MODULES)} módulos del laboratorio", "neutral"),
+        ("clock", "Última actualización", LAST_UPDATE, f"versión {VERSION} · commit {short}", "neutral"),
+        ("plug", "Estado de conexión", conn_value, conn_note, conn_tone),
+    ]
+    cells = "".join(
+        f'<div class="kpi {tone}" style="animation-delay:{0.06 * i:.2f}s"><div class="k-top">'
+        f'<span class="k-ic">{icon(ic, 16)}</span><span class="k-lab">{lab}</span></div>'
+        f'<div class="k-val">{html_escape(val)}</div><div class="k-note">{html_escape(note)}</div></div>'
+        for i, (ic, lab, val, note, tone) in enumerate(tiles)
     )
+    return f'<div class="dpst-kpis">{cells}</div>'
+
+
+def _hero_chart_html() -> str:
+    """
+    Panel derecho de la portada. Si el usuario ya descargó un activo, dibuja su precio
+    ajustado real (los mismos datos de Preselección). Si no, la línea es ilustrativa y se rotula así.
+    """
+    result = st.session_state.get("asset_result")
+    series = None
+    if result is not None and getattr(result, "ok", False) and result.prices is not None and len(result.prices.columns):
+        col = "adjusted_close" if "adjusted_close" in result.prices.columns else result.prices.columns[0]
+        series = result.prices[col].dropna()
+    grid = "".join(f'<line x1="0" x2="610" y1="{y}" y2="{y}"/>' for y in (40, 90, 140, 190))
+    if series is not None and len(series) >= 2:
+        step = max(1, len(series) // 120)
+        pts = series.iloc[::step]
+        if pts.index[-1] != series.index[-1]:
+            pts = pd.concat([pts, series.iloc[-1:]])
+        lo, hi = float(pts.min()), float(pts.max())
+        span = (hi - lo) or 1.0
+        xs = [600 * i / (len(pts) - 1) for i in range(len(pts))]
+        ys = [20 + 170 * (1 - (float(v) - lo) / span) for v in pts]
+        path = "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
+        ccy = result.currency or ""
+        head_title = f"{html_escape(result.ticker)} · precio ajustado"
+        badge = f'<span class="c-badge real">{icon("check", 12)}Datos reales · {html_escape(result.source)}</span>'
+        foot = (f'<div class="c-foot"><span><b>{float(series.iloc[-1]):,.2f}</b> {html_escape(ccy)} · último dato '
+                f'{series.index.max().date()}</span><span>{len(series)} observaciones · '
+                f'{series.index.min().date()} → {series.index.max().date()}</span></div>')
+        axis = f'<div class="c-y"><span>{hi:,.2f}</span><span>{lo:,.2f}</span></div>'
+        end_x, end_y = xs[-1], ys[-1]
+    else:
+        path = _HERO_SPARK
+        head_title = "Vista ilustrativa"
+        badge = f'<span class="c-badge demo">{icon("info", 12)}Ilustrativo · no son datos de mercado</span>'
+        foot = ('<div class="c-foot"><span>Descarga un activo en <b>Preselección de activos</b> y aquí verás '
+                'su precio real.</span></div>')
+        axis = ""
+        end_x, end_y = 600, 41.1
+    return (
+        f'<div class="dpst-chart"><div class="c-head"><span class="c-title">{head_title}</span>{badge}</div>'
+        f'<div class="c-plot">{axis}<svg class="spark" viewBox="0 0 610 200" preserveAspectRatio="none" aria-hidden="true">'
+        '<defs><linearGradient id="dpstSparkFill" x1="0" y1="0" x2="0" y2="1">'
+        '<stop offset="0%" stop-color="#34C9A0" stop-opacity="0.32"/>'
+        '<stop offset="100%" stop-color="#34C9A0" stop-opacity="0"/></linearGradient>'
+        '<filter id="dpstGlow" x="-5%" y="-20%" width="110%" height="140%"><feGaussianBlur stdDeviation="3" result="b"/>'
+        '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>'
+        f'<g class="grid">{grid}</g>'
+        f'<path class="area" d="{path} L600,200 L0,200 Z" fill="url(#dpstSparkFill)"/>'
+        f'<path class="line" d="{path}" fill="none" stroke="#34C9A0" stroke-width="2.2" filter="url(#dpstGlow)" '
+        'stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
+        f'<circle class="halo" cx="{end_x:.1f}" cy="{end_y:.1f}" r="9" fill="#34C9A0" fill-opacity="0.25"/>'
+        f'<circle class="dot" cx="{end_x:.1f}" cy="{end_y:.1f}" r="4" fill="#BDEFDF"/>'
+        f'</svg></div>{foot}</div>'
+    )
+
+
+def _home_hero_html() -> str:
+    tape = "".join(f"<span>{item}</span>" for item in HERO_TAPE * 2)
+    return (
+        '<div class="dpst-hero dash"><div class="h-grid"><div class="copy">'
+        '<span class="dpst-pill">PRESELECCIÓN ACADÉMICA</span>'
+        f'<div class="brand">{_logo_svg(72, "logoGradHero")}<h1>{BRAND_NAME}</h1></div>'
+        f'<div class="sub">{SYSTEM_NAME}</div>'
+        f'<div class="meta">{TEAM_NAME} · {INSTITUTION} · Teoría Moderna de Portafolios · versión {VERSION}</div>'
+        f'</div>{_hero_chart_html()}</div>'
+        f'<div class="dpst-tape" aria-hidden="true"><div class="track">{tape}</div></div></div>'
+    )
+
+
+def _home_modules_html() -> str:
+    cards = "".join(
+        f'<button type="button" class="mod" data-dpst-go="{html_escape(tab)}" style="animation-delay:{0.06 * i:.2f}s">'
+        f'<span class="m-ic">{icon(ic, 22)}</span><span class="m-name">{html_escape(tab)}</span>'
+        f'<span class="m-desc">{html_escape(desc)}</span><span class="m-go">Entrar {icon("arrow", 15)}</span></button>'
+        for i, (tab, ic, desc) in enumerate(HOME_MODULES)
+    )
+    return f'{section_label_html("Accesos rápidos", "bolt")}<div class="dpst-mods">{cards}</div>'
+
+
+def _home_steps_html() -> str:
+    cards = []
+    for i, (num, title, desc) in enumerate(HOME_STEPS):
+        tab, open_, ic, go_text = HOME_STEP_TARGETS.get(num, ("Inicio", None, "info", "Ir a Inicio"))
+        attrs = f' data-dpst-go="{html_escape(tab)}"' + (f' data-dpst-open="{html_escape(open_)}"' if open_ else "")
+        cards.append(
+            f'<div class="dpst-card step" style="animation-delay:{0.08 * i:.2f}s">'
+            f'<div class="s-top"><span class="s-num">{int(num):02d}</span><span class="s-ic">{icon(ic, 20)}</span></div>'
+            f'<div class="n">Paso {num}</div><div class="t">{title}</div><div class="d">{_md_bold(desc)}</div>'
+            f'<button type="button" class="s-go"{attrs}>{html_escape(go_text)} {icon("arrow", 14)}</button></div>'
+        )
+    return f'<div class="dpst-steps">{"".join(cards)}</div>'
+
+
+def render_home(user_name: str, user_email: str) -> None:
+    """
+    Portada tipo dashboard: encabezado DPST con gráfica (real si ya hay un activo descargado),
+    indicadores de la sesión, accesos a los módulos, guía de uso, noticias y pie. Conserva todo
+    el contenido de la portada anterior; solo cambia la presentación.
+    """
+    st.markdown(_home_hero_html(), unsafe_allow_html=True)
+    st.markdown(_home_kpis_html(), unsafe_allow_html=True)
     st.markdown(
         '<div class="dpst-notice"><b>Este bot no te dice en qué invertir.</b> '
         "Te ayuda a <b>mirar y comparar</b> empresas con datos del pasado, como ejercicio de una clase de la "
         "universidad. No es una recomendación, no compra ni vende nada y no garantiza ganancias.</div>",
         unsafe_allow_html=True,
     )
+    st.markdown(_home_modules_html(), unsafe_allow_html=True)
     st.markdown("#### Cómo usar el bot", help=(
         "Sigue los pasos en orden. Cada vez que veas un **?** junto a un título o una casilla, pon el mouse encima: "
         "aparece una explicación corta."))
-    cols = st.columns(len(HOME_STEPS))
-    for i, (col, (num, title, desc)) in enumerate(zip(cols, HOME_STEPS)):
-        col.markdown(
-            f'<div class="dpst-card" style="animation-delay:{0.08 * i:.2f}s"><div class="n">Paso {num}</div>'
-            f'<div class="t">{title}</div><div class="d">{_md_bold(desc)}</div></div>',
-            unsafe_allow_html=True,
-        )
+    st.markdown(_home_steps_html(), unsafe_allow_html=True)
     st.caption("Las **Tasas soberanas** muestran cuánto paga el gobierno de cada país por prestarle dinero: sirven "
                "de punto de comparación.")
     render_news_home()
-    with st.expander("Disclaimer académico completo"):
-        st.write(DISCLAIMER_TEXT)
-    with st.expander("Equipo y política de uso"):
-        for member in MEMBERS:
-            st.write(f"- {member}")
-        st.info(EXECUTION_POLICY_SUMMARY)
-    with st.expander("Comprobar conexiones reales (evidencia de la prueba P2-3)"):
-        render_connection_check()
-    commit = git_commit()
-    st.caption(
-        f"Versión {VERSION} · commit `{commit[:7] if commit and commit != 'no disponible' else 'N/D'}` · "
-        f"última actualización {LAST_UPDATE} · sesión iniciada como {user_name} ({user_email})"
-    )
+    with st.container(key="dpst_home_footer"):
+        st.markdown(section_label_html("Información del piloto", "shield"), unsafe_allow_html=True)
+        with st.expander("Disclaimer académico completo", icon=":material/gavel:"):
+            st.write(DISCLAIMER_TEXT)
+        with st.expander("Equipo y política de uso", icon=":material/group:"):
+            for member in MEMBERS:
+                st.write(f"- {member}")
+            st.info(EXECUTION_POLICY_SUMMARY)
+        with st.expander("Comprobar conexiones reales (evidencia de la prueba P2-3)", icon=":material/lan:"):
+            render_connection_check()
+        commit = git_commit()
+        short = commit[:7] if commit and commit != "no disponible" else "N/D"
+        chips = [("Versión", VERSION), ("Commit", short), ("Última actualización", LAST_UPDATE),
+                 ("Sesión iniciada como", f"{user_name} ({user_email})")]
+        st.markdown(
+            '<div class="dpst-version">' + "".join(
+                f'<div class="v"><span class="vl">{lab}</span><span class="vv">{html_escape(val)}</span></div>'
+                for lab, val in chips) + "</div>",
+            unsafe_allow_html=True,
+        )
     if not DEV_MODE and st.button("Cerrar sesión"):
         st.logout()
 

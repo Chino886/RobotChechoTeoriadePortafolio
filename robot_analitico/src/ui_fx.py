@@ -302,6 +302,177 @@ html { font-optical-sizing: auto; }
 }
 @media (prefers-reduced-transparency: reduce) { .dpst-news .nv-list, .dpst-news .nv-btn { backdrop-filter: none; background: #121A2B; } }
 
+/* ===== Piezas comunes ===== */
+.dpst-ico { flex: none; }
+.dpst-eyebrow {
+    display: inline-flex; align-items: center; gap: 8px; color: #34C9A0;
+    font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.74rem; letter-spacing: 0.16em; text-transform: uppercase;
+}
+.dpst-label {
+    display: flex; align-items: center; gap: 8px; margin: 1.6rem 0 0.7rem; color: #8C99B3;
+    font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.74rem; letter-spacing: 0.14em; text-transform: uppercase;
+}
+.dpst-label svg { color: #34C9A0; }
+.dpst-empty {
+    display: flex; gap: 16px; align-items: flex-start; padding: 1.3rem 1.4rem; border-radius: 18px;
+    border: 1px dashed rgba(148, 170, 210, 0.28); background: rgba(18, 26, 43, 0.5);
+}
+.dpst-empty .ic {
+    flex: none; width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: #6AA8FF;
+    background: rgba(106, 168, 255, 0.10); border: 1px solid rgba(106, 168, 255, 0.28);
+}
+.dpst-empty.warn .ic { color: #F5B84B; background: rgba(245, 184, 75, 0.10); border-color: rgba(245, 184, 75, 0.3); }
+.dpst-empty .t { font-weight: 600; color: #E8EDF6; margin-bottom: 2px; }
+.dpst-empty .b { color: #AEB9CE; font-size: 0.93rem; line-height: 1.55; }
+
+/* ===== Inicio: encabezado tipo terminal ===== */
+.dpst-hero.dash { padding: 2rem 2rem 0; }
+.dpst-hero.dash::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit; opacity: 0.5;
+    background-image: linear-gradient(rgba(148,170,210,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(148,170,210,.05) 1px, transparent 1px);
+    background-size: 44px 44px; -webkit-mask-image: radial-gradient(80% 90% at 30% 20%, #000 20%, transparent 75%);
+            mask-image: radial-gradient(80% 90% at 30% 20%, #000 20%, transparent 75%);
+}
+.dpst-hero.dash .h-grid { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 1.6rem; align-items: stretch; }
+.dpst-hero.dash .copy { max-width: none; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
+.dpst-hero.dash .brand { display: flex; align-items: center; gap: 18px; margin-top: 1rem; }
+.dpst-hero.dash .brand svg { filter: drop-shadow(0 0 22px rgba(52, 201, 160, 0.35)); }
+.dpst-hero.dash h1 {
+    margin: 0 !important; font-size: clamp(4rem, 9vw, 7.4rem) !important; line-height: 0.9 !important; letter-spacing: -0.02em;
+    background: linear-gradient(180deg, #FFFFFF 10%, #BDEFDF 70%, #6FE3C1); -webkit-background-clip: text; background-clip: text; color: transparent !important;
+}
+.dpst-hero.dash .sub { font-size: 1.3rem; margin-top: 0.8rem; color: #E8EDF6; font-weight: 500; letter-spacing: -0.01em; }
+.dpst-hero.dash .meta { margin-top: 0.7rem; max-width: 46ch; line-height: 1.7; }
+.dpst-hero.dash .spark { position: static; width: 100%; height: 100%; }
+.dpst-hero.dash .dpst-tape { margin: 1.6rem -2rem 0; }
+.dpst-chart {
+    position: relative; display: flex; flex-direction: column; border-radius: 18px; overflow: hidden;
+    border: 1px solid rgba(148, 170, 210, 0.16); background: linear-gradient(180deg, rgba(10, 15, 28, 0.72), rgba(14, 21, 38, 0.6));
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04); animation: dpst-rise .8s cubic-bezier(.2,.8,.2,1) .1s both;
+}
+.dpst-chart .c-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0.9rem 1.1rem; border-bottom: 1px solid rgba(148, 170, 210, 0.10); flex-wrap: wrap; }
+.dpst-chart .c-title { font-weight: 600; color: #E8EDF6; font-size: 0.98rem; }
+.dpst-chart .c-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.68rem; letter-spacing: .06em; }
+.dpst-chart .c-badge.real { color: #BDEFDF; background: rgba(52, 201, 160, 0.12); border: 1px solid rgba(52, 201, 160, 0.35); }
+.dpst-chart .c-badge.demo { color: #AEB9CE; background: rgba(148, 170, 210, 0.08); border: 1px solid rgba(148, 170, 210, 0.22); }
+.dpst-chart .c-plot { position: relative; flex: 1; min-height: 210px; padding: 0.6rem 1rem 0.2rem 1rem; }
+.dpst-chart .c-plot .grid line { stroke: rgba(148, 170, 210, 0.10); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.dpst-chart .c-y { position: absolute; right: 1.2rem; top: 0.6rem; bottom: 0.6rem; display: flex; flex-direction: column; justify-content: space-between; z-index: 2;
+    font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.68rem; color: #8C99B3; pointer-events: none; }
+.dpst-chart .c-foot { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 0.7rem 1.1rem 0.9rem; border-top: 1px solid rgba(148, 170, 210, 0.10);
+    font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.74rem; color: #8C99B3; }
+.dpst-chart .c-foot b { color: #E8EDF6; font-weight: 600; font-size: 0.9rem; }
+.dpst-chart .c-foot span:only-child { font-family: 'Geist', system-ui, sans-serif; font-size: 0.84rem; }
+
+/* ===== Indicadores ===== */
+.dpst-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.dpst-kpis .kpi {
+    position: relative; padding: 1rem 1.1rem; border-radius: 16px; border: 1px solid rgba(148, 170, 210, 0.14);
+    background: linear-gradient(180deg, rgba(18, 26, 43, 0.85), rgba(14, 21, 38, 0.7)); min-width: 0;
+    transition: border-color .25s, transform .4s cubic-bezier(.2,.8,.2,1); animation: dpst-rise .7s cubic-bezier(.2,.8,.2,1) both;
+}
+.dpst-kpis .kpi:hover { border-color: rgba(52, 201, 160, 0.4); transform: translateY(-3px); }
+.dpst-kpis .k-top { display: flex; align-items: center; gap: 8px; }
+.dpst-kpis .k-ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: #34C9A0; background: rgba(52, 201, 160, 0.10); }
+.dpst-kpis .k-lab { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.7rem; letter-spacing: .12em; text-transform: uppercase; color: #8C99B3; }
+.dpst-kpis .k-val { margin-top: 0.7rem; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 1.7rem; font-weight: 500; color: #E8EDF6; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.dpst-kpis .k-note { margin-top: 0.2rem; font-size: 0.8rem; line-height: 1.4; color: #8C99B3; overflow-wrap: anywhere; }
+.dpst-kpis .kpi.good .k-ic { color: #34C9A0; }
+.dpst-kpis .kpi.warn .k-ic { color: #F5B84B; background: rgba(245, 184, 75, 0.10); }
+.dpst-kpis .kpi.good::after, .dpst-kpis .kpi.warn::after {
+    content: ""; position: absolute; top: 1rem; right: 1rem; width: 8px; height: 8px; border-radius: 50%;
+    background: #34C9A0; box-shadow: 0 0 10px #34C9A0; animation: dpst-pulse 2.4s infinite;
+}
+.dpst-kpis .kpi.warn::after { background: #F5B84B; box-shadow: 0 0 10px #F5B84B; }
+
+/* ===== Accesos rápidos ===== */
+.dpst-mods { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.dpst-mods .mod {
+    position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left; cursor: pointer;
+    padding: 1.15rem 1.15rem 1rem; border-radius: 18px; border: 1px solid rgba(148, 170, 210, 0.14); color: #E8EDF6; font: inherit;
+    background: radial-gradient(240px 120px at 100% 0%, rgba(52, 201, 160, 0.10), transparent 70%), rgba(18, 26, 43, 0.75);
+    transition: border-color .25s, transform .4s cubic-bezier(.2,.8,.2,1), box-shadow .3s; animation: dpst-rise .7s cubic-bezier(.2,.8,.2,1) both; overflow: hidden;
+}
+.dpst-mods .mod:hover { border-color: rgba(52, 201, 160, 0.5); transform: translateY(-4px); box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(52,201,160,.12); }
+.dpst-mods .mod:active { transform: scale(0.97); transition-duration: 100ms; }
+.dpst-mods .m-ic { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: #6FE3C1;
+    background: linear-gradient(180deg, rgba(52, 201, 160, 0.18), rgba(52, 201, 160, 0.06)); border: 1px solid rgba(52, 201, 160, 0.3);
+    transition: transform .4s cubic-bezier(.2,.8,.2,1); }
+.dpst-mods .mod:hover .m-ic { transform: rotate(-6deg) scale(1.06); }
+.dpst-mods .m-name { font-weight: 600; font-size: 1.02rem; margin-top: 4px; }
+.dpst-mods .m-desc { color: #94A1BA; font-size: 0.86rem; line-height: 1.45; flex: 1; }
+.dpst-mods .m-go { display: inline-flex; align-items: center; gap: 6px; color: #34C9A0; font-weight: 600; font-size: 0.86rem; margin-top: 4px; }
+.dpst-mods .m-go svg { transition: transform .3s cubic-bezier(.2,.8,.2,1); }
+.dpst-mods .mod:hover .m-go svg { transform: translateX(4px); }
+
+/* ===== Guía de uso: cinco pasos ===== */
+.dpst-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.dpst-card.step { display: flex; flex-direction: column; min-height: 0; padding: 1.1rem 1.1rem 1rem; }
+.dpst-card.step .s-top { display: flex; align-items: center; justify-content: space-between; }
+.dpst-card.step .s-num { font-family: 'Instrument Serif', Georgia, serif; font-size: 2.6rem; line-height: 1;
+    background: linear-gradient(180deg, #6FE3C1, rgba(52, 201, 160, 0.35)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.dpst-card.step .s-ic { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; color: #6FE3C1;
+    background: rgba(52, 201, 160, 0.10); border: 1px solid rgba(52, 201, 160, 0.28); transition: transform .4s cubic-bezier(.2,.8,.2,1); }
+.dpst-card.step:hover .s-ic { transform: translateY(-2px) rotate(-6deg); }
+.dpst-card.step .n { margin-top: 0.7rem; }
+.dpst-card.step .d { flex: 1; }
+.dpst-card.step .s-go {
+    align-self: flex-start; margin-top: 0.9rem; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px;
+    font: inherit; font-size: 0.8rem; font-weight: 600; color: #BDEFDF; cursor: pointer;
+    background: rgba(52, 201, 160, 0.08); border: 1px solid rgba(52, 201, 160, 0.28); transition: background .2s, border-color .2s, transform .1s ease-out;
+}
+.dpst-card.step .s-go:hover { background: rgba(52, 201, 160, 0.18); border-color: #34C9A0; }
+.dpst-card.step .s-go:active { transform: scale(0.96); }
+.dpst-card.step .s-go svg { transition: transform .3s cubic-bezier(.2,.8,.2,1); }
+.dpst-card.step .s-go:hover svg { transform: translateX(3px); }
+
+/* ===== DPST Financial News ===== */
+.dpst-newshead { margin-top: 2.2rem; }
+.dpst-newshead .nh-title { font-family: 'Instrument Serif', Georgia, serif; font-size: clamp(2rem, 3.4vw, 2.8rem); line-height: 1.05; color: #E8EDF6; margin-top: 0.35rem; letter-spacing: -0.015em; }
+.dpst-news .nv-slide.has-img { flex-direction: row; align-items: stretch; gap: 1.6rem; justify-content: flex-start; }
+.dpst-news .nv-body { position: relative; z-index: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 12px; min-width: 0; flex: 1; }
+.dpst-news .nv-slide.has-img .nv-body { justify-content: center; }
+.dpst-news .nv-media { flex: 0 0 38%; max-width: 38%; border-radius: 16px; overflow: hidden; border: 1px solid rgba(148, 170, 210, 0.16); align-self: center; aspect-ratio: 4 / 3; background: #0A0F1C; }
+.dpst-news .nv-media img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 6s ease; }
+.dpst-news .nv-slide:not([aria-hidden="true"]) .nv-media img { transform: scale(1.06); }
+.dpst-news .nv-cat { color: #0A0F1C; background: linear-gradient(180deg, #6FE3C1, #22A883); padding: 3px 10px; border-radius: 999px; font-weight: 600; }
+.dpst-news .nv-sum { color: #AEB9CE; font-size: 0.98rem; line-height: 1.55; max-width: 62ch;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.dpst-news .nv-slide.has-img .nv-title { font-size: clamp(1.5rem, 2.4vw, 2.3rem); }
+.dpst-news .nv-pips { display: flex; gap: 6px; align-items: center; }
+.dpst-news .nv-pip { width: 7px; height: 7px; padding: 0; border-radius: 999px; border: 0; cursor: pointer; background: rgba(232, 237, 246, 0.25);
+    transition: width .35s cubic-bezier(.2,.9,.25,1), background .25s; }
+.dpst-news .nv-pip:hover { background: rgba(232, 237, 246, 0.5); }
+.dpst-news .nv-pip.on { width: 22px; background: #34C9A0; }
+
+/* ===== Pie de Inicio ===== */
+.st-key-dpst_home_footer { margin-top: 1.6rem; padding: 0.2rem 1.2rem 1.2rem; border-radius: 22px; border: 1px solid rgba(148, 170, 210, 0.12); background: rgba(14, 21, 38, 0.5); }
+.dpst-version { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 0.4rem; }
+.dpst-version .v { padding: 0.75rem 0.9rem; border-radius: 12px; border: 1px solid rgba(148, 170, 210, 0.12); background: rgba(10, 15, 28, 0.55); min-width: 0; }
+.dpst-version .vl { display: block; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.66rem; letter-spacing: .12em; text-transform: uppercase; color: #8C99B3; }
+.dpst-version .vv { display: block; margin-top: 3px; color: #E8EDF6; font-size: 0.88rem; overflow-wrap: anywhere; }
+
+@media (max-width: 1100px) {
+    .dpst-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+    .dpst-hero.dash .h-grid { grid-template-columns: minmax(0, 1fr); }
+    .dpst-kpis, .dpst-mods, .dpst-version { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .dpst-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .dpst-news .nv-slide.has-img { flex-direction: column; }
+    .dpst-news .nv-media { flex: none; max-width: 100%; width: 100%; aspect-ratio: 16 / 7; }
+}
+@media (max-width: 560px) {
+    .dpst-hero.dash { padding: 1.4rem 1.1rem 0; }
+    .dpst-hero.dash .dpst-tape { margin: 1.4rem -1.1rem 0; }
+    .dpst-hero.dash .brand svg { width: 52px; height: 52px; }
+    .dpst-kpis, .dpst-mods, .dpst-steps, .dpst-version { grid-template-columns: minmax(0, 1fr); }
+    .dpst-news .nv-pips { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .dpst-news .nv-media img { transition: none; transform: none !important; }
+}
+
 /* El componente invisible que carga los efectos no debe ocupar espacio. */
 [data-testid="stElementContainer"]:has(> iframe[title="st.iframe"][height="0"]),
 [data-testid="stElementContainer"]:has(iframe[height="0"]) { display: none; }
@@ -483,6 +654,28 @@ _FX_JS = r"""
     cur.querySelector('.d').style.top = (y - (sr.top - hr.top)) + 'px';
   }
 
+  /* ---------- accesos directos de Inicio: [data-dpst-go="Pestaña"] (+ data-dpst-open="Desplegable") ---------- */
+  D.addEventListener('click', e => {
+    const a = e.target && e.target.closest ? e.target.closest('[data-dpst-go]') : null;
+    if (!a) return;
+    e.preventDefault();
+    const top = clickTab('.st-key-dpst_nav', a.dataset.dpstGo);
+    const m = D.querySelector('[data-testid="stMain"]');
+    if (m) m.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+    const want = a.dataset.dpstOpen;
+    if (top && want) setTimeout(() => {
+      // El texto del resumen incluye el nombre del ícono de la flecha; se busca el título
+      // dentro de él y, si hay varios, el más corto (p. ej. «Pronóstico» antes que «Pronóstico por canasta…»).
+      const label = x => { const p = x.querySelector('[data-testid="stMarkdownContainer"]'); return (p ? p.textContent : x.textContent).trim(); };
+      const sum = [...D.querySelectorAll('[data-testid="stExpander"] summary')]
+        .filter(x => x.offsetParent !== null && label(x).startsWith(want))
+        .sort((a, b) => label(a).length - label(b).length)[0];
+      if (!sum) return;
+      const det = sum.closest('details'); if (det && !det.open) sum.click();
+      setTimeout(() => sum.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }), 250);
+    }, 400);
+  });
+
   /* ---------- carrusel de noticias de Inicio ----------
      Pasa solo cada N segundos (se pausa con el mouse encima, con el foco dentro, con el botón
      de pausa o si la pestaña no se ve). Se puede arrastrar 1:1 con el dedo o el mouse; al soltar
@@ -494,6 +687,7 @@ _FX_JS = r"""
     if (root.__nv) return;
     const stage = root.querySelector('.nv-stage'), track = root.querySelector('.nv-track');
     const slides = [...root.querySelectorAll('.nv-slide')], rows = [...root.querySelectorAll('.nv-row')];
+    const pips = [...root.querySelectorAll('.nv-pip')];
     const n = slides.length; if (!n || !stage || !track) return;
     const count = root.querySelector('.nv-count b'), prog = root.querySelector('.nv-progress i'), list = root.querySelector('.nv-list');
     const playBtn = root.querySelector('[data-play]');
@@ -517,12 +711,14 @@ _FX_JS = r"""
       if (reduce) { s.x.v = s.x.t; s.x.vel = 0; s.paint(); track.animate([{ opacity: 0.35 }, { opacity: 1 }], { duration: 220 }); }
       slides.forEach((el, k) => { if (k === s.i) el.removeAttribute('aria-hidden'); else el.setAttribute('aria-hidden', 'true'); });
       rows.forEach((el, k) => el.classList.toggle('on', k === s.i));
+      pips.forEach((el, k) => { el.classList.toggle('on', k === s.i); el.setAttribute('aria-current', k === s.i ? 'true' : 'false'); });
       if (count) count.textContent = String(s.i + 1).padStart(2, '0');
       root.dataset.tone = String(s.i % 3);
       syncList();
     };
     root.addEventListener('click', e => {
       const go = e.target.closest('[data-go]'), nav = e.target.closest('[data-nav]'), play = e.target.closest('[data-play]');
+      if (go || nav) s.hold = performance.now() + 9000;   // tras elegir a mano, espera antes de seguir solo
       if (go) s.go(+go.dataset.go);
       else if (nav) s.go(s.i + (+nav.dataset.nav));
       else if (play) {
@@ -582,7 +778,7 @@ _FX_JS = r"""
       const s = root.__nv;
       if (!s.drag && s.x.step(dt)) s.paint();
       const visible = s.seen && root.offsetParent !== null && !D.hidden;
-      if (visible && !s.paused && !s.hover && !s.focus && !s.drag) {
+      if (visible && !s.paused && !s.hover && !s.focus && !s.drag && !(s.hold && now < s.hold)) {
         s.elapsed += dt * 1000;
         if (s.elapsed >= s.dur) s.go(s.i + 1);
       }
@@ -730,36 +926,51 @@ def _safe_link(url: str) -> str:
 def news_carousel_html(items: "list[dict]", label: str, format_date) -> str:
     """
     Recuadro grande de noticias que pasan solas (carrusel). Usa las mismas noticias ya
-    verificadas por la app (título, enlace, medio, fecha); solo cambia cómo se muestran.
-    Sin JavaScript se ve la primera noticia y la lista completa con sus enlaces.
+    verificadas por la app: título, enlace, medio y fecha, más resumen, imagen y tema
+    cuando la fuente los trae (Yahoo Finance y Alpha Vantage). Nada se inventa: si un
+    campo no viene, no se muestra. La etiqueta de categoría es la de la fuente o, si no
+    trae, la de la pestaña. Sin JavaScript se ve la primera noticia y la lista completa.
     El HTML no lleva líneas en blanco para que Markdown no lo parta.
     """
-    slides, rows = [], []
+    slides, rows, dots = [], [], []
     n = len(items)
+    tab_label = html.escape(label)
     for i, item in enumerate(items):
         title = html.escape(str(item.get("title", "")).strip() or "Noticia sin título")
         publisher = html.escape(str(item.get("publisher", "")).strip() or "Medio N/D")
         when = html.escape(format_date(item.get("published")))
         link = _safe_link(item.get("link", ""))
+        image = _safe_link(item.get("image", ""))
+        category = html.escape(str(item.get("category", "") or "").strip()) or tab_label
+        summary = " ".join(str(item.get("summary", "") or "").split())
+        summary = html.escape(summary[:260].rsplit(" ", 1)[0] + "…" if len(summary) > 260 else summary)
         mono = publisher[:1].upper() if publisher[:1].isalnum() else "N"
         hidden_attr = ' aria-hidden="true"' if i else ""
         cta = (f'<a class="nv-link" href="{link}" target="_blank" rel="noopener noreferrer">'
                f'Leer la noticia completa<span aria-hidden="true">↗</span></a>') if link else ""
-        slides.append(
-            f'<article class="nv-slide" data-i="{i}" aria-roledescription="noticia" aria-label="{i + 1} de {n}"'
-            f'{hidden_attr}>'
+        media = (f'<div class="nv-media"><img src="{image}" alt="" loading="lazy" referrerpolicy="no-referrer" '
+                 f'onerror="this.closest(\'.nv-media\').remove()"></div>') if image else \
             f'<div class="nv-mono" aria-hidden="true">{mono}</div>'
-            f'<div class="nv-meta"><span class="nv-src">{publisher}</span><span class="nv-dot">·</span><span>{when}</span></div>'
-            f'<div class="nv-title">{title}</div>{cta}</article>'
+        slides.append(
+            f'<article class="nv-slide{" has-img" if image else ""}" data-i="{i}" aria-roledescription="noticia" '
+            f'aria-label="{i + 1} de {n}"{hidden_attr}>{media}<div class="nv-body">'
+            f'<div class="nv-meta"><span class="nv-cat">{category}</span><span class="nv-src">{publisher}</span>'
+            f'<span class="nv-dot">·</span><span>{when}</span></div>'
+            f'<div class="nv-title">{title}</div>'
+            + (f'<div class="nv-sum">{summary}</div>' if summary else "")
+            + f'{cta}</div></article>'
         )
         rows.append(
             f'<li><button type="button" class="nv-row{" on" if i == 0 else ""}" data-go="{i}" aria-label="Ver noticia {i + 1}: {title}">'
             f'<span class="nv-n">{i + 1:02d}</span><span class="nv-rt">{title}</span>'
-            f'<span class="nv-rs">{publisher}</span><span class="nv-bar"><i></i></span></button></li>'
+            f'<span class="nv-rs">{publisher} · {category}</span><span class="nv-bar"><i></i></span></button></li>'
         )
+        dots.append(f'<button type="button" class="nv-pip{" on" if i == 0 else ""}" data-go="{i}" '
+                    f'aria-label="Ir a la noticia {i + 1}"></button>')
     controls = (
         '<div class="nv-ui">'
         f'<span class="nv-count"><b>01</b> / {n:02d}</span>'
+        f'<span class="nv-pips">{"".join(dots)}</span>'
         '<span class="nv-btns">'
         '<button type="button" class="nv-btn" data-nav="-1" aria-label="Noticia anterior">'
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>'
@@ -772,9 +983,78 @@ def news_carousel_html(items: "list[dict]", label: str, format_date) -> str:
     )
     return (
         f'<div class="dpst-news" data-autoplay="{NEWS_AUTOPLAY_MS}" tabindex="0" role="region" '
-        f'aria-roledescription="carrusel" aria-label="Noticias: {html.escape(label)}">'
+        f'aria-roledescription="carrusel" aria-label="Noticias: {tab_label}">'
         f'<div class="nv-stage"><div class="nv-glow" aria-hidden="true"></div>'
         f'<div class="nv-track">{"".join(slides)}</div>{controls}'
         f'<div class="nv-progress" aria-hidden="true"><i></i></div></div>'
         f'<ol class="nv-list">{"".join(rows)}</ol></div>'
     )
+
+
+# ---------------------------------------------------------------------------
+# Piezas comunes del diseño (mismos íconos, encabezados y estados en todas las pantallas)
+# ---------------------------------------------------------------------------
+
+# Íconos de trazo (24 × 24, línea 1.8), dibujados para el bot: mismo grosor y esquinas en todas partes.
+ICONS = {
+    "home": '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
+    "search": '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+    "tag": '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+    "chart": '<path d="M3 3v18h18"/><path d="m7 14 4-4 3 3 5-6"/>',
+    "landmark": '<path d="M3 21h18M5 21v-9m4 9v-9m6 9v-9m4 9v-9M2 10l10-6 10 6z"/>',
+    "layers": '<path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>',
+    "trending": '<path d="m3 17 6-6 4 4 8-8"/><path d="M14 7h7v7"/>',
+    "scale": '<path d="M12 3v18M7 21h10M5 7h14M5 7l-3 7a3.5 3.5 0 0 0 6 0zM19 7l-3 7a3.5 3.5 0 0 0 6 0z"/>',
+    "basket": '<path d="M3 9h18l-2 11H5z"/><path d="m8 9 4-6 4 6M9 13v4m3-4v4m3-4v4"/>',
+    "database": '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+    "news": '<path d="M4 4h13v16H6a2 2 0 0 1-2-2z"/><path d="M17 8h3v10a2 2 0 0 1-2 2M8 8h5M8 12h5M8 16h3"/>',
+    "shield": '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/>',
+    "users": '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6"/>',
+    "plug": '<path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5"/>',
+    "info": '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',
+    "arrow": '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    "external": '<path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>',
+    "activity": '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+    "alert": '<path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/>',
+    "curve": '<path d="M3 21C5 12 10 6 21 3"/><circle cx="8" cy="13" r="1.4"/><circle cx="14" cy="7.5" r="1.4"/>',
+    "sliders": '<path d="M4 6h10M18 6h2M4 12h3M11 12h9M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+    "refresh": '<path d="M20 11a8 8 0 0 0-14.5-4.5L4 8M4 3.5V8h4.5M4 13a8 8 0 0 0 14.5 4.5L20 16M20 20.5V16h-4.5"/>',
+    "history": '<path d="M3 12a9 9 0 1 0 2.6-6.4L3 8M3 3v5h5M12 7v5l3 2"/>',
+    "target": '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
+    "file": '<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M8 13h8M8 17h6"/>',
+    "download": '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
+    "clock": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    "calendar": '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+    "globe": '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/>',
+    "cpu": '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M10 10h4v4h-4zM9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
+    "wallet": '<path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h15V9H5a2 2 0 0 1-2-2z"/><circle cx="16" cy="14.5" r="1.2"/>',
+    "bolt": '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+    "key": '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14.5 8.5l2 2"/>',
+    "check": '<path d="m5 12 4 4 10-10"/>',
+    "lock": '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+}
+
+
+def icon(name: str, size: int = 18, cls: str = "dpst-ico") -> str:
+    """SVG en línea de ICONS; hereda el color del texto (currentColor)."""
+    body = ICONS.get(name, ICONS["info"])
+    return (f'<svg class="{cls}" width="{size}" height="{size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            f'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{body}</svg>')
+
+
+def page_header_html(eyebrow: str, title: str, subtitle: str, icon_name: str) -> str:
+    """Encabezado común de cada pantalla: etiqueta con ícono, título serif y subtítulo."""
+    return (f'<div class="dpst-ph"><div class="dpst-eyebrow">{icon(icon_name, 15)}<span>{html.escape(eyebrow)}</span></div>'
+            f'<div class="dpst-page-title">{html.escape(title)}</div>'
+            f'<div class="dpst-page-sub">{html.escape(subtitle)}</div></div>')
+
+
+def section_label_html(text: str, icon_name: str) -> str:
+    """Rótulo pequeño en mayúsculas con ícono, para separar bloques dentro de una pantalla."""
+    return f'<div class="dpst-label">{icon(icon_name, 14)}<span>{html.escape(text)}</span></div>'
+
+
+def empty_state_html(icon_name: str, title: str, body_html: str, tone: str = "info") -> str:
+    """Estado vacío o aviso de conexión con ícono, título y texto (el texto lo pone la app, ya escapado)."""
+    return (f'<div class="dpst-empty {tone}"><div class="ic">{icon(icon_name, 22)}</div>'
+            f'<div class="tx"><div class="t">{html.escape(title)}</div><div class="b">{body_html}</div></div></div>')
