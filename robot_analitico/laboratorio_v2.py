@@ -32,6 +32,7 @@ from src.capm import (
     wacc,
 )
 from src.backtest import ALL_STRATEGIES, ESTIMATORS, BacktestConfig, select_by_validation, walk_forward
+from src.insights import record as record_insight
 from src.charts import DARK_LAYOUT, ELECTRIC_BLUE, ACCENT_GOLD, NEGATIVE, PLOTLY_CONFIG, POSITIVE, STAR_WHITE, polish
 from src.data import fetch_asset_data, resample_prices
 from src.data_quality import (
@@ -404,6 +405,12 @@ def _tab_risk(lab: LabData):
         return None
     stats = portfolio_stats(w, lab.mu, lab.sigma)
     rc = risk_contributions(w, lab.sigma)
+    off = corr.where(~np.eye(len(corr), dtype=bool)).stack()
+    record_insight(st.session_state, "risk", "Cartera de Riesgo conjunto (diversificación)", {
+        "vol": float(stats.volatility * np.sqrt(m)), "mean": float(stats.mean * m),
+        "wavg_vol": float(weighted_average_volatility(w, lab.sigma) * np.sqrt(m)),
+        "corr_min": float(off.min()) if len(off) else None, "corr_max": float(off.max()) if len(off) else None,
+        "weights": {a: float(w[a]) for a in w.index}})
     a, b, c = st.columns(3)
     a.metric("Rendimiento esperado (anual)", _pct(stats.mean * m))
     b.metric("Volatilidad de la cartera (anual)", _pct(stats.volatility * np.sqrt(m)))
@@ -618,6 +625,14 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None
             row.update({a: res.weights[a] for a in lab.mu.index})
         rows.append(row)
     table = pd.DataFrame(rows).set_index("cartera")
+    record_insight(st.session_state, "markowitz", f"Markowitz: GMV, tangente y óptimo personal ({len(lab.mu)} activos)", {
+        "rf_ea": rf_ea, "n_assets": len(lab.mu),
+        "n_frontier": int(((frontier["rama"] == "eficiente") & (frontier["estado"] == "óptimo")).sum()) if not frontier.empty else 0,
+        "rows": [{"cartera": res.name, "ok": res.ok, "estado": res.status,
+                  "ret": float(ann_mu(res.mean)) if res.ok else None, "vol": float(ann_vol(res.volatility)) if res.ok else None,
+                  "sharpe": float((res.mean - rf) / res.volatility) if res.ok and res.volatility > 0 else None,
+                  "weights": {a: float(res.weights[a]) for a in lab.mu.index} if res.ok else None}
+                 for res in (gmv, tangent, personal, top)]})
     st.dataframe(table.style.format({c: "{:.2%}" for c in ["rendimiento anual", "volatilidad anual", *lab.mu.index]} | {"Sharpe (por periodo)": "{:.3f}"},
                                     na_rep="—"))
     for res in (gmv, tangent, personal, top):
@@ -746,6 +761,10 @@ def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds, group
     hist_excess = lab.mu - rf
     comp = pd.DataFrame({"histórico (exceso)": hist_excess, "prior π": res.prior, "posterior BL": res.posterior}) * m
     st.markdown(f"**Expectativas anualizadas en exceso** · views usadas: {res.n_views}")
+    record_insight(st.session_state, "bl", f"Black-Litterman: prior y posterior ({res.n_views} views)", {
+        "n_views": res.n_views, "tau": tau, "delta": delta,
+        "rows": [{"activo": a, "hist": float(comp.loc[a, "histórico (exceso)"]), "prior": float(comp.loc[a, "prior π"]),
+                  "post": float(comp.loc[a, "posterior BL"])} for a in comp.index]})
     st.dataframe(comp.style.format("{:.2%}"))
     if res.view_residuals is not None:
         st.caption("Residual P·μ_BL − Q por view (anual): " + ", ".join(f"{k}: {v * m:+.2%}" for k, v in res.view_residuals.items()))
@@ -1113,6 +1132,11 @@ def _capm_and_performance(lab: LabData, results, betas: pd.Series, mret: pd.Seri
            "alfa de Jensen", "error de seguimiento"]
     st.dataframe(show.style.format({c: "{:.2%}" for c in pct if c in show} | {c: "{:.3f}" for c in
                                    ("Sharpe", "beta", "R²", "razón de información") if c in show}, na_rep="—"))
+    _num = lambda x: None if x is None or pd.isna(x) else float(x)  # noqa: E731
+    record_insight(st.session_state, "capm", f"Beta y desempeño frente a {bench_name}", {
+        "bench": bench_name, "window": f"{lab.returns.index[0].date()} a {lab.returns.index[-1].date()}",
+        "rows": [{"cartera": str(i), "beta": _num(r.get("beta")), "r2": _num(r.get("R²")), "sharpe": _num(r.get("Sharpe"))}
+                 for i, r in show.iterrows()]})
     _explain("¿Qué significa cada indicador?", AYUDA["desempeno"])
 
 
