@@ -4,6 +4,7 @@ Robot analítico para la preselección de activos - Teoría Moderna de
 Portafolios, Tech Business School - Universidad EIA.
 """
 import base64
+from dataclasses import asdict
 import json
 from pathlib import Path
 
@@ -56,6 +57,10 @@ from src.ui_fx import (apply_ui_fx, empty_state_html, icon, news_carousel_html, 
 from src.news_links import verify_items
 from src.compare_view import (PERIODS, asset_panel_html, comparison_table_html, evolution_figure,
                                mean_bar_figure, quantile_figure, risk_bar_figures)
+from src.insights import CTX_KEY as INSIGHTS_CTX_KEY, HISTORY_KEY as INSIGHTS_HISTORY_KEY
+from src.insights import SUGGESTIONS as INSIGHT_SUGGESTIONS, answer as insight_answer
+from src.insights import answer_html as insight_answer_html, context_options
+from src.insights import record as record_insight
 from src.dashboard import Kpi, Service, TrackedAsset, dashboard_html, spark_data, track_activity
 from src.forecasting import (
     FORECAST_MODELS,
@@ -779,6 +784,10 @@ def render_forecast() -> None:
     model = fit_fn(returns)
     dist = terminal_distribution(model, p0, horizon)
     steps = forecast_path(model, p0, horizon)
+    record_insight(st.session_state, "forecast", f"Pronóstico de {result.ticker} (H = {horizon}, {dist.model_name})", {
+        "ticker": result.ticker, "model": dist.model_name, "h": horizon, "freq": frequency, "p0": p0,
+        "median": steps[-1].median_price, "q05": steps[-1].q05_price, "q95": steps[-1].q95_price,
+        "mean_pp": dist.mean_per_period, "std_pp": dist.std_per_period})
 
     st.latex(r"P_H = P_0 \cdot \exp(g_{1} + g_{2} + \dots + g_{H}), \quad g_{1}+\dots+g_{H} \sim \mathcal{N}(m_H,\, v_H)")
     st.write(
@@ -1437,6 +1446,9 @@ def _render_rate_series(fred_api_key: str, info: dict, label: str, rates_start, 
         if not year_ago.empty:
             m3.metric("Cambio en 12 meses", f"{series.iloc[-1] - year_ago.iloc[-1]:+.2f} p.p.")
         m4.metric("Serie de FRED", info["id"], help=f"{len(series)} observaciones en el periodo elegido.")
+    record_insight(st.session_state, "rates", f"Tasa soberana de {label} ({info['id']})", {
+        "label": label, "id": info["id"], "last": float(series.iloc[-1]), "date": str(series.index[-1].date()),
+        "n": len(series), "chg12": float(series.iloc[-1] - year_ago.iloc[-1]) if not year_ago.empty else None})
 
     series_by_label = {label: series}
     for other in compare or []:
@@ -2101,8 +2113,8 @@ def main() -> None:
     # Menú superior. Se usan pestañas (y no páginas de st.navigation) para que
     # los datos escritos en una sección no se borren al pasar a otra.
     with st.container(key="dpst_nav"):
-        tab_home, tab_tickers, tab_pre, tab_rates, tab_lab = st.tabs(
-            ["Inicio", "Tickers", "Preselección de activos", "Tasas soberanas", LAB_TITLE]
+        tab_home, tab_tickers, tab_pre, tab_rates, tab_lab, tab_ins = st.tabs(
+            ["Inicio", "Tickers", "Preselección de activos", "Tasas soberanas", LAB_TITLE, INSIGHTS_TITLE]
         )
         with tab_home:
             render_home(user_name, user_email)
@@ -2120,6 +2132,8 @@ def main() -> None:
             _page_title(LAB_TITLE,
                         "Carteras simuladas con los modelos del avance 2.")
             render_portfolio_lab()
+        with tab_ins:  # al final: lee los resultados que acaban de mostrar las otras pestañas
+            render_insights_page()
     render_dashboard()
 
 
@@ -2282,6 +2296,108 @@ def render_tickers_page() -> None:
                                  column_config={"ticker": "Ticker", "empresa": "Empresa", "bolsa": "Bolsa", "tipo": "Tipo"})
 
 
+INSIGHTS_TITLE = "DPST Insights"
+
+
+def _insights_inputs():
+    """Valores ya calculados en la sesión (los mismos que muestran Preselección y Comparación)."""
+    asset = None
+    a = _asset_stats()
+    if a:
+        result, prices, freq, stats, dd = a
+        asset = {"ticker": result.ticker, "freq": freq or "Diaria", "n": stats.n, "mean": stats.mean_annualized,
+                 "vol": stats.std_annualized, "dd": dd, "start": str(prices.index.min().date()),
+                 "end": str(prices.index.max().date())}
+    comparison = None
+    cmp_ = st.session_state.get("comparison_result")
+    if cmp_ is not None and getattr(cmp_, "ok", False) and cmp_.summaries:
+        comparison = {"rows": [{"ticker": s.ticker, "mean": s.mean_annual, "vol": s.vol_annual, "rvr": s.rvr}
+                               for s in cmp_.summaries],
+                      "window": f"{cmp_.common_start.date()} a {cmp_.common_end.date()}",
+                      "currency": cmp_.base_currency or ""}
+    return asset, comparison, st.session_state.get(INSIGHTS_CTX_KEY) or {}
+
+
+def _ask_insight(question: str) -> None:
+    question = (question or "").strip()
+    if not question:
+        return
+    asset, comparison, ctx = _insights_inputs()
+    opts = context_options(asset, comparison, ctx)
+    chosen = st.session_state.get("insights_sel")
+    selected = next((o for o in opts if o[1] == chosen), None)
+    ans = insight_answer(question, asset, comparison, ctx, selected)
+    st.session_state.setdefault(INSIGHTS_HISTORY_KEY, []).append({
+        "q": question, "sel": selected[1] if selected else None, "a": asdict(ans),
+        "ts": pd.Timestamp.now(tz="UTC").strftime("%H:%M UTC")})
+
+
+def render_insights_page() -> None:
+    """Asistente de interpretación: explica resultados de la sesión con textos académicos y valores reales."""
+    st.markdown(page_header_html("Asistente de interpretación", "DPST Financial Insights",
+                                 "Te explica, con palabras sencillas, qué significan los resultados que ya calculó el bot.",
+                                 "bot"), unsafe_allow_html=True)
+    st.markdown(
+        '<div class="ins-note">' + icon("shield", 16) + '<span><b>Solo explica, no recomienda.</b> No dice qué comprar, '
+        'vender ni cuánto invertir. Usa únicamente los resultados de esta sesión; si un resultado no existe, lo dice y '
+        'explica el concepto en general. Motor local de DPST: no envía tus datos a ningún servicio de IA.</span></div>',
+        unsafe_allow_html=True)
+    asset, comparison, ctx = _insights_inputs()
+    opts = context_options(asset, comparison, ctx)
+    left, right = st.columns([1, 2.2], gap="medium")
+    with left:
+        with st.container(key="ins_side"):
+            st.markdown(section_label_html("Resultado a explicar", "target"), unsafe_allow_html=True)
+            labels = ["(Ninguno · explicación general)"] + [o[1] for o in opts]
+            st.selectbox("Elige un resultado de DPST", labels, key="insights_sel",
+                         help="El asistente usará los valores reales de ese resultado. La lista crece a medida que "
+                              "usas Preselección, Tasas soberanas y el Laboratorio.")
+            if not opts:
+                st.caption("Aún no hay resultados en esta sesión: descarga un activo, compara, consulta una tasa o abre "
+                           "el Laboratorio y vuelve aquí.")
+            else:
+                times = {k: v["ts"] for k, v in ctx.items()}
+                st.caption(f"{len(opts)} resultado(s) disponibles" + (
+                    " · último registrado " + max(times.values()) if times else ""))
+            st.markdown(section_label_html("Preguntas sugeridas", "bolt"), unsafe_allow_html=True)
+            for i, (_topic, text) in enumerate(INSIGHT_SUGGESTIONS):
+                st.button(text, key=f"ins_sug_{i}", on_click=_ask_insight, args=(text,), use_container_width=True)
+            if st.session_state.get(INSIGHTS_HISTORY_KEY):
+                st.button("Borrar conversación", key="ins_clear", icon=":material/delete:",
+                          on_click=lambda: st.session_state.pop(INSIGHTS_HISTORY_KEY, None))
+    with right:
+        with st.container(key="ins_chat"):
+            history = st.session_state.get(INSIGHTS_HISTORY_KEY) or []
+            box = st.container(height=620, key="ins_log")
+            with box:
+                if not history:
+                    st.markdown(
+                        '<div class="ins-empty">' + icon("bot", 34) + '<b>Hola, soy DPST Financial Insights.</b>'
+                        '<span>Pregúntame por la volatilidad, la rentabilidad, el Sharpe, la beta, la frontera eficiente, '
+                        'Markowitz, Black-Litterman, los pronósticos o las tasas soberanas. Si eliges un resultado a la '
+                        'izquierda, lo explico con sus valores reales.</span></div>', unsafe_allow_html=True)
+                for item in history:
+                    with st.chat_message("user", avatar=":material/person:"):
+                        st.markdown(html_escape(item["q"]) + (f"  \n*Resultado: {html_escape(item['sel'])}*"
+                                                             if item.get("sel") else ""))
+                    with st.chat_message("assistant", avatar=":material/smart_toy:"):
+                        st.markdown(insight_answer_html(item["a"], icon), unsafe_allow_html=True)
+                        st.caption(item["ts"])
+            prompt = st.chat_input("Escribe tu pregunta (ej.: ¿qué significa esta volatilidad y cómo la interpreto?)",
+                                   key="ins_input")
+            if prompt:
+                _ask_insight(prompt)
+                st.rerun()
+    with st.expander("Cómo funciona este asistente", icon=":material/info:"):
+        st.markdown(
+            "- **Motor local y determinista:** el proyecto no tiene conexión a un servicio de IA, así que DPST no envía "
+            "nada afuera ni usa claves de API. Las explicaciones son textos académicos fijos.\n"
+            "- **Valores reales:** cada pantalla anota lo que muestra (por ejemplo, la tabla de Markowitz o la última "
+            "tasa de FRED) y el asistente lo lee tal cual. No recalcula modelos ni inventa indicadores.\n"
+            "- **Límites:** no da recomendaciones personalizadas de inversión; los supuestos de los modelos se señalan como "
+            "supuestos, no como hechos.")
+
+
 def _command_items() -> "list[dict]":
     """Entradas del buscador Ctrl/⌘ + K: secciones del menú superior y módulos del laboratorio."""
     sections = [
@@ -2290,6 +2406,7 @@ def _command_items() -> "list[dict]":
         ("Preselección de activos", "Un activo, pronóstico y comparación"),
         ("Tasas soberanas", "Bonos del gobierno por país (FRED)"),
         (LAB_TITLE, "Carteras simuladas del avance 2"),
+        (INSIGHTS_TITLE, "Asistente que explica los resultados"),
     ]
     items = [{"group": "Secciones", "label": name, "top": name, "hint": hint} for name, hint in sections]
     items += [{"group": LAB_TITLE, "label": module, "top": LAB_TITLE, "sub": module, "hint": "Módulo"}

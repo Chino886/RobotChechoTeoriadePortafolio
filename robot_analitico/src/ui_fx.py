@@ -1037,6 +1037,43 @@ html { font-optical-sizing: auto; }
 .cmp-table td.st { display: table-cell; }
 @media (max-width: 560px) { .cmp-cards { grid-template-columns: minmax(0, 1fr); } .cmp-tools { flex-direction: column; align-items: stretch; } }
 
+/* ===================== DPST Financial Insights ===================== */
+.ins-note { display: flex; gap: 10px; align-items: flex-start; margin: 6px 0 14px; padding: 0.75rem 1rem; border-radius: 12px; font-size: 0.86rem;
+    color: var(--dp-text-1); background: rgba(var(--dp-accent-rgb), 0.06); border: 1px solid rgba(var(--dp-accent-rgb), 0.22); }
+.ins-note svg { flex: none; color: var(--dp-accent); margin-top: 2px; }
+.ins-note b { color: var(--dp-ink); }
+.st-key-ins_side { padding: 1rem; border-radius: 14px; background: var(--dp-surface); border: 1px solid rgba(var(--dp-line-rgb), 0.12); }
+.st-key-ins_side [data-testid="stButton"] button { justify-content: flex-start; text-align: left; font-size: 0.84rem; border-radius: 10px;
+    background: var(--dp-surface-2); border: 1px solid rgba(var(--dp-line-rgb), 0.12); transition: border-color .2s, transform .2s, background .2s; }
+.st-key-ins_side [data-testid="stButton"] button > div { width: 100%; justify-content: flex-start; }
+.st-key-ins_side [data-testid="stButton"] button p { text-align: left; }
+.st-key-ins_side [data-testid="stButton"] button:hover { border-color: rgba(var(--dp-accent-rgb), 0.5); background: rgba(var(--dp-accent-rgb), 0.06); transform: translateX(2px); }
+.st-key-ins_chat { padding: 0.6rem; border-radius: 16px; background: var(--dp-surface); border: 1px solid rgba(var(--dp-line-rgb), 0.12);
+    box-shadow: 0 1px 2px rgba(var(--dp-shadow-rgb), calc(0.06 * var(--dp-shadow-k))); }
+.st-key-ins_log { border: 0 !important; background: var(--dp-surface-2) !important; border-radius: 12px; }
+.ins-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 3.5rem 1.5rem; color: var(--dp-muted); }
+.ins-empty svg { color: var(--dp-accent); padding: 12px; width: 58px; height: 58px; border-radius: 16px; background: rgba(var(--dp-accent-rgb), 0.1); }
+.ins-empty b { color: var(--dp-ink); font-size: 1.05rem; }
+.ins-empty span { max-width: 52ch; font-size: 0.9rem; line-height: 1.5; }
+.ins-ans { animation: dpst-rise .4s cubic-bezier(.2,.8,.2,1) both; }
+.ins-title { font-family: 'Instrument Serif', Georgia, serif; font-size: 1.45rem; color: var(--dp-ink); margin-bottom: 6px; }
+.ins-sec { margin-top: 10px; padding: 0.7rem 0.85rem; border-radius: 12px; background: var(--dp-surface); border: 1px solid rgba(var(--dp-line-rgb), 0.1); }
+.ins-st { display: flex; align-items: center; gap: 7px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.68rem; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--dp-muted); margin-bottom: 4px; }
+.ins-st svg { color: var(--dp-accent); }
+.ins-sec p { margin: 0; font-size: 0.92rem; line-height: 1.55; color: var(--dp-text-1); }
+.ins-sec ul { margin: 4px 0 0 1.1rem; padding: 0; }
+.ins-sec li { font-size: 0.88rem; line-height: 1.5; color: var(--dp-text-1); margin: 2px 0; }
+.ins-sec.ind { border-color: rgba(var(--dp-accent-rgb), 0.3); background: rgba(var(--dp-accent-rgb), 0.04); }
+.ins-sec.ind li { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.82rem; }
+.ins-sec.lim .ins-st svg { color: var(--dp-amber); }
+.ins-sec.ex { border-style: dashed; }
+.ins-badge { display: inline-block; margin: 2px 0 4px; padding: 2px 9px; border-radius: 999px; font-size: 0.7rem; font-weight: 600; }
+.ins-badge.real { color: var(--dp-on-accent); background: linear-gradient(180deg, var(--dp-accent-hi), var(--dp-accent-lo)); }
+.ins-badge.gen { color: var(--dp-muted); background: rgba(var(--dp-line-rgb), 0.08); }
+.ins-ans.refused .ins-title { color: var(--dp-amber-ink); }
+.ins-src { margin-top: 8px; font-size: 0.76rem; color: var(--dp-faint); }
+
 @media (prefers-reduced-motion: reduce) {
     [data-testid="stMainBlockContainer"] * { animation: none !important; }
     .dash-spark .l { stroke-dashoffset: 0; }
@@ -1673,6 +1710,17 @@ _FX_JS = r"""
   new P.MutationObserver(() => { clearTimeout(cmpT); cmpT = setTimeout(() => D.querySelectorAll('.cmp-panel:not([data-ready])').forEach(p => { p.dataset.ready = '1'; cmpApply(p); }), 90); })
     .observe(D.body, { childList: true, subtree: true });
 
+  /* ---------- DPST Insights: la conversación baja sola al último mensaje ---------- */
+  let insN = 0, insT;
+  new P.MutationObserver(() => { clearTimeout(insT); insT = setTimeout(() => {
+    const log = D.querySelector('.st-key-ins_log'); if (!log) return;
+    const n = log.querySelectorAll('[data-testid="stChatMessage"]').length;
+    if (n === insN) return; insN = n;
+    const sc = [log, ...log.querySelectorAll('*')].find(e => e.scrollHeight > e.clientHeight + 20 && /(auto|scroll)/.test(getComputedStyle(e).overflowY));
+    const last = log.querySelectorAll('[data-testid="stChatMessage"]');
+    if (sc && last.length >= 2) sc.scrollTo({ top: last[last.length - 2].offsetTop - 8, behavior: reduce ? 'auto' : 'smooth' });
+  }, 120); }).observe(D.body, { childList: true, subtree: true });
+
   /* ---------- carrusel de noticias de Inicio ----------
      Pasa solo cada N segundos (se pausa con el mouse encima, con el foco dentro, con el botón
      de pausa o si la pestaña no se ve). Se puede arrastrar 1:1 con el dedo o el mouse; al soltar
@@ -1994,6 +2042,7 @@ def news_carousel_html(items: "list[dict]", label: str, format_date) -> str:
 
 # Íconos de trazo (24 × 24, línea 1.8), dibujados para el bot: mismo grosor y esquinas en todas partes.
 ICONS = {
+    "bot": '<rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 3v4M8.5 12h.01M15.5 12h.01M9 16h6M2 12v3M22 12v3"/>',
     "star": '<path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z"/>',
     "home": '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
     "search": '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
