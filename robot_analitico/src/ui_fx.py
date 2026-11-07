@@ -866,7 +866,7 @@ _FX_JS = r"""
      con él se pintan tablas, campos y menús nativos). El interruptor sol/luna usa los
      mismos botones de tema del menú de Streamlit (stMainMenuItem-theme-Light/Dark), y
      html[data-dpst-theme] hace que los estilos propios sigan a ese tema al instante. */
-  const TKEY = 'dpst_theme';
+  const TKEY = 'dpst_theme_v2';  // v2: todos arrancan en claro (se ignoran pruebas anteriores en oscuro)
   const store = { get() { try { return P.localStorage.getItem(TKEY); } catch (e) { return null; } },
                   set(v) { try { P.localStorage.setItem(TKEY, v); } catch (e) {} } };
   function activeTheme() {
@@ -937,12 +937,17 @@ _FX_JS = r"""
   setInterval(syncTheme, 400);
   syncTheme();
   // Preferencia guardada (claro por defecto): si el tema activo no coincide, se ajusta una vez.
-  setTimeout(() => {
+  // Se reintenta unos segundos por si el menú de Streamlit aún no ha cargado.
+  try { P.localStorage.removeItem('dpst_theme'); } catch (e) {}
+  if (!store.get()) store.set('light');
+  let enforceTries = 0;
+  (function enforce() {
     const want = store.get() || 'light';
-    if (!store.get()) store.set('light');
     const now = activeTheme();
-    if (now && now !== want) { paint(want, false); setStreamlitTheme(want === 'dark' ? 'Dark' : 'Light'); }
-  }, 600);
+    if (now && now === want) return;
+    if (now) { paint(want, false); setStreamlitTheme(want === 'dark' ? 'Dark' : 'Light'); }
+    if (++enforceTries < 8) setTimeout(enforce, 900);
+  })();
 
   /* ---------- barra de progreso de scroll ---------- */
   const bar = D.createElement('div'); bar.id = 'dpst-progress'; D.body.appendChild(bar);
