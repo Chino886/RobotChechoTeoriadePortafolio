@@ -27,7 +27,7 @@ from src.analytics import (
 from src.auth import is_auth_configured, require_login
 import plotly.graph_objects as go
 
-from src.charts import DARK_LAYOUT, forecast_chart, price_chart, return_chart, risk_return_map
+from src.charts import DARK_LAYOUT, PLOTLY_CONFIG, forecast_chart, price_chart, return_chart, risk_return_map
 from src.comparison import (
     MIN_COMPARISON_ASSETS,
     build_comparison,
@@ -54,6 +54,8 @@ from html import escape as html_escape
 from src.ui_fx import (apply_ui_fx, empty_state_html, icon, news_carousel_html, page_header_html,
                        section_label_html)
 from src.news_links import verify_items
+from src.compare_view import (PERIODS, asset_panel_html, comparison_table_html, evolution_figure,
+                               mean_bar_figure, quantile_figure, risk_bar_figures)
 from src.dashboard import Kpi, Service, TrackedAsset, dashboard_html, spark_data, track_activity
 from src.forecasting import (
     FORECAST_MODELS,
@@ -1069,14 +1071,56 @@ def render_comparison() -> None:
 
     non_dominated = non_dominated_tickers(result.summaries)
     table = comparison_table(result, non_dominated)
+    names = _ticker_names()
+
+    # Panel visual de los activos: se llena al final, cuando ya se conoce el criterio de Preselección.
+    st.markdown(section_label_html("Panel de activos", "layers"), unsafe_allow_html=True)
+    panel_slot = st.container(key="cmp_panel")
 
     st.markdown(section_label_html("Resultados", "scale"), unsafe_allow_html=True)
-    tab_table, tab_map, tab_select, tab_export = st.tabs(
-        ["Tabla comparativa", "Mapa histórico", "Preselección", "Exportar"]
+    tab_table, tab_evo, tab_risk, tab_map, tab_select, tab_export = st.tabs(
+        ["Tabla comparativa", "Evolución y rentabilidad", "Riesgo", "Mapa histórico", "Preselección", "Exportar"]
     )
-
+    table_slot = tab_table.container()
     with tab_table:
-        st.dataframe(table)
+        with st.expander("Ver como tabla de datos (ordenar, buscar dentro y descargar)", icon=":material/table:"):
+            st.dataframe(table)
+
+    with tab_evo:
+        tickers_all = [s.ticker for s in result.summaries]
+        c1, c2, c3 = st.columns([1.2, 1, 2.2])
+        with c1:
+            period = st.segmented_control("Periodo", PERIODS, default="Todo", key="cmp_evo_period") or "Todo"
+        with c2:
+            mode = st.segmented_control("Ver", ["Variación %", "Precio"], default="Variación %", key="cmp_evo_mode") \
+                or "Variación %"
+        with c3:
+            shown = st.multiselect("Activos en el gráfico", tickers_all, default=tickers_all[:8], key="cmp_evo_tickers",
+                                   help="Al inicio se muestran 8 para que se lea bien; agrega o quita los que quieras. "
+                                        "También puedes tocar un nombre en la leyenda para ocultar o mostrar su línea.")
+        if shown:
+            st.plotly_chart(evolution_figure(result, shown, period, mode), use_container_width=True,
+                            config=PLOTLY_CONFIG)
+            st.caption(
+                "Precios procesados de la ventana común (los mismos que se exportan), en "
+                f"{result.base_currency}. «Variación %» = precio / primer precio del periodo − 1: solo cambia la "
+                "escala para comparar; no modifica las métricas de la tabla. Doble clic en el gráfico restaura la vista.")
+        else:
+            st.info("Elige al menos un activo para ver su evolución.")
+        st.plotly_chart(mean_bar_figure(result.summaries, non_dominated), use_container_width=True, config=PLOTLY_CONFIG)
+        st.caption("Media histórica logarítmica anualizada de la tabla comparativa. Azul intenso = activo no dominado.")
+
+    with tab_risk:
+        st.caption("Métricas de riesgo que ya calcula la comparación (las mismas de la tabla). Azul o rojo intenso = "
+                   "activo no dominado. Beta y Sharpe no forman parte de esta preselección: Beta está en el "
+                   "Laboratorio de portafolios.")
+        figs = risk_bar_figures(result.summaries, non_dominated)
+        r1, r2 = st.columns(2)
+        r1.plotly_chart(figs[0], use_container_width=True, config=PLOTLY_CONFIG)
+        r2.plotly_chart(figs[1], use_container_width=True, config=PLOTLY_CONFIG)
+        r3, r4 = st.columns(2)
+        r3.plotly_chart(figs[2], use_container_width=True, config=PLOTLY_CONFIG)
+        r4.plotly_chart(quantile_figure(result.summaries, non_dominated), use_container_width=True, config=PLOTLY_CONFIG)
 
     with tab_map:
         st.markdown("**Marca tu elección final**")
@@ -1090,7 +1134,7 @@ def render_comparison() -> None:
             risk_return_map(result.summaries, non_dominated, starred_value), use_container_width=True
         )
         st.caption(
-            "Rombos verdes = activos NO dominados (ningún otro activo del lote ofrece a la "
+            "Rombos resaltados = activos NO dominados (ningún otro activo del lote ofrece a la "
             "vez media igual o mayor y volatilidad igual o menor). Esto no es una frontera "
             "eficiente de portafolios ni una recomendación de la mejor inversión universal. "
             "La estrella blanca solo marca tu elección personal; no es un criterio de preselección."
@@ -1134,6 +1178,7 @@ def render_comparison() -> None:
                     index=1,
                     key="comparison_risk_profile",
                 )
+            crit_label = f"Perfil {risk_profile}"
             with st.container(border=True):
                 st.markdown(f"**Perfil {risk_profile}**")
                 st.caption(risk_profile_explanations[risk_profile])
@@ -1156,6 +1201,7 @@ def render_comparison() -> None:
                 key="comparison_criterion",
             )
             st.caption(CRITERION_EXPLANATIONS[criterion])
+            crit_label = criterion
 
             if criterion == "Máxima media histórica bajo límite de riesgo":
                 risk_limit = st.number_input(
@@ -1179,6 +1225,15 @@ def render_comparison() -> None:
             st.success(f"Mejor según este criterio: {', '.join(selected)}{tie_note}")
         else:
             st.warning("Ningún activo cumple este criterio con los parámetros elegidos.")
+
+    with panel_slot:
+        st.markdown(asset_panel_html(result, names, non_dominated, selected or [], starred_value, crit_label),
+                    unsafe_allow_html=True)
+    with table_slot:
+        st.markdown(comparison_table_html(result, names, non_dominated, selected or [], starred_value),
+                    unsafe_allow_html=True)
+        st.caption("Barras = diferencia frente al resto del lote en cada columna · ● = mejor valor de la columna · "
+                   "toca un encabezado para ordenar. Valores idénticos a la tabla de datos.")
 
     with tab_export:
         st.write("Descarga los datos procesados de esta comparación (RF-22).")
@@ -2093,6 +2148,15 @@ def _ticker_avatar(ticker: str) -> str:
     """Ícono genérico con la inicial del ticker (no es el logo de la empresa: no se inventan identidades)."""
     hue = sum(ord(c) for c in ticker) % 3  # tres tonos de la paleta, siempre el mismo para el mismo ticker
     return f'<span class="tk-av h{hue}" aria-hidden="true">{html_escape(ticker[:1] or "?")}</span>'
+
+
+def _ticker_names() -> "dict[str, str]":
+    """Nombre de cada ticker según el directorio de la pestaña Tickers (si no está, se deja sin nombre)."""
+    try:
+        directory, _complete = _ticker_directory()
+        return dict(zip(directory["ticker"], directory["empresa"]))
+    except Exception:
+        return {}
 
 
 def _fav_button(ticker: str, name: str) -> str:
