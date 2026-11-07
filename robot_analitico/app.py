@@ -54,6 +54,7 @@ from html import escape as html_escape
 from src.ui_fx import (apply_ui_fx, empty_state_html, icon, news_carousel_html, page_header_html,
                        section_label_html)
 from src.news_links import verify_items
+from src.dashboard import Kpi, Service, TrackedAsset, dashboard_html, spark_data, track_activity
 from src.forecasting import (
     FORECAST_MODELS,
     WALKFORWARD_ORIGINS,
@@ -2067,6 +2068,7 @@ def main() -> None:
             _page_title(LAB_TITLE,
                         "Carteras simuladas con los modelos del avance 2.")
             render_portfolio_lab()
+    render_dashboard()
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
@@ -2093,6 +2095,13 @@ def _ticker_avatar(ticker: str) -> str:
     return f'<span class="tk-av h{hue}" aria-hidden="true">{html_escape(ticker[:1] or "?")}</span>'
 
 
+def _fav_button(ticker: str, name: str) -> str:
+    """Estrella de favorito (se guarda en el navegador; el dashboard de Inicio la muestra en «Activos seguidos»)."""
+    return (f'<button type="button" class="dash-fav" data-fav="{html_escape(ticker)}" data-fav-name="{html_escape(name)}" '
+            f'aria-pressed="false" title="Marcar como favorito" aria-label="Marcar {html_escape(ticker)} como favorito">'
+            f'{icon("star", 14)}</button>')
+
+
 def _tickers_table_html(rows: pd.DataFrame, selected: "str | None") -> str:
     """Tabla del screener: mismas columnas y datos de la búsqueda (ticker, empresa, bolsa, tipo)."""
     body = []
@@ -2102,7 +2111,7 @@ def _tickers_table_html(rows: pd.DataFrame, selected: "str | None") -> str:
         delay = f' style="animation-delay:{min(i, 24) * 0.018:.3f}s"'
         body.append(
             f'<tr{on}{delay} data-t="{html_escape(t)}"><td class="n">{i + 1}</td>'
-            f'<td class="tk">{_ticker_avatar(t)}<b>{html_escape(t)}</b></td>'
+            f'<td class="tk">{_ticker_avatar(t)}<b>{html_escape(t)}</b>{_fav_button(t, e)}</td>'
             f'<td class="em">{html_escape(e)}</td>'
             f'<td><span class="tk-ex">{html_escape(b)}</span></td>'
             f'<td><span class="tk-type {cls}">{icon(ic, 13)}{html_escape(k)}</span></td></tr>'
@@ -2204,7 +2213,8 @@ def render_tickers_page() -> None:
                         f'<div class="tk-sel">{_ticker_avatar(ticker)}<div class="sx"><div class="st">Empresa seleccionada'
                         f'</div><div class="sn"><b>{html_escape(ticker)}</b> {html_escape(row["empresa"])}</div></div>'
                         f'<span class="tk-ex">{html_escape(row["bolsa"])}</span>'
-                        f'<span class="tk-type {cls}">{icon(ic, 13)}{html_escape(row["tipo"])}</span></div>',
+                        f'<span class="tk-type {cls}">{icon(ic, 13)}{html_escape(row["tipo"])}</span>'
+                        f'{_fav_button(ticker, row["empresa"])}</div>',
                         unsafe_allow_html=True)
                 with st.expander("Ver como tabla de datos (ordenar, buscar dentro y descargar)", icon=":material/table:"):
                     st.dataframe(options, hide_index=True, height=320,
@@ -2322,43 +2332,180 @@ def _configured_keys() -> "dict[str, bool]":
     return out
 
 
-def _home_kpis_html() -> str:
-    """Indicadores de la portada. Solo información que ya existe en la app o en esta sesión."""
-    tickers = _session_tickers()
+def _connection_summary() -> "tuple[str, str, str]":
+    """Valor, nota y tono del indicador de conexión (misma regla de siempre)."""
     keys = _configured_keys()
     log = st.session_state.get("conn_check_log") or []
     if log:
         last_time = str(log[-1].get("hora (UTC)", ""))
         last_batch = [r for r in log if str(r.get("hora (UTC)", ""))[:16] == last_time[:16]] or log[-1:]
         ok = sum(1 for r in last_batch if r.get("estado") == "conectado")
-        conn_value = f"{ok} / {len(last_batch)}"
-        conn_note = f"servicios conectados · última prueba {last_time[11:16]} UTC"
-        conn_tone = "good" if ok == len(last_batch) else "warn"
-    else:
-        n_keys = sum(keys.values())
-        conn_value = f"{n_keys} / {len(keys)}"
-        conn_note = "claves de API configuradas · " + " · ".join(
-            f"{name} {'✓' if has else '—'}" for name, has in keys.items())
-        conn_tone = "good" if n_keys == len(keys) else "warn"
+        return (f"{ok} / {len(last_batch)}", f"servicios conectados · última prueba {last_time[11:16]} UTC",
+                "good" if ok == len(last_batch) else "warn")
+    n_keys = sum(keys.values())
+    return (f"{n_keys} / {len(keys)}",
+            "claves de API configuradas · " + " · ".join(f"{name} {'✓' if has else '—'}" for name, has in keys.items()),
+            "good" if n_keys == len(keys) else "warn")
+
+
+def _asset_stats():
+    """Estadísticas del activo descargado, con las mismas funciones del Análisis histórico (no se recalcula distinto)."""
+    result = st.session_state.get("asset_result")
+    if result is None or not getattr(result, "ok", False) or result.prices is None \
+            or "adjusted_close" not in result.prices.columns:
+        return None
+    prices = result.prices["adjusted_close"].dropna()
+    returns = log_returns(prices)
+    if len(returns) < 2:
+        return None
+    frequency = st.session_state.get("asset_frequency")
+    stats = descriptive_stats(returns, FREQUENCY_PERIODS_PER_YEAR.get(frequency, 252))
+    return result, prices, frequency, stats, max_drawdown(prices)
+
+
+def _dashboard_kpis(events: "list[dict]") -> "list[Kpi]":
+    tickers = _session_tickers()
+    conn_value, conn_note, conn_tone = _connection_summary()
     commit = git_commit()
     short = commit[:7] if commit and commit != "no disponible" else "N/D"
-    if tickers:
-        assets_note = ", ".join(tickers[:6]) + ("…" if len(tickers) > 6 else "")
-    else:
-        assets_note = "en esta sesión · descarga uno en Preselección"
-    tiles = [
-        ("database", "Activos analizados", str(len(tickers)), assets_note, "neutral"),
-        ("layers", "Modelos disponibles", str(len(HERO_TAPE)), f"en {len(LAB_MODULES)} módulos del laboratorio", "neutral"),
-        ("clock", "Última actualización", LAST_UPDATE, f"versión {VERSION} · commit {short}", "neutral"),
-        ("plug", "Estado de conexión", conn_value, conn_note, conn_tone),
+    pre, data_mod, hist_mod = "Preselección de activos", "Datos del activo a probar", "Análisis histórico"
+    kpis = [
+        Kpi("assets", "database", "Activos analizados", str(len(tickers)),
+            (", ".join(tickers[:6]) + ("…" if len(tickers) > 6 else "")) if tickers
+            else "en esta sesión · descarga uno en Preselección",
+            "Activos que ya descargaste o comparaste en esta sesión (Datos del activo y Comparación).",
+            go=pre, open=data_mod),
+        Kpi("models", "layers", "Modelos disponibles", str(len(HERO_TAPE)), f"en {len(LAB_MODULES)} módulos del laboratorio",
+            "Modelos y herramientas del Laboratorio de portafolios (Markowitz, Black-Litterman, CAPM, backtest…).",
+            go=LAB_TITLE),
+        Kpi("update", "clock", "Última actualización", LAST_UPDATE, f"versión {VERSION} · commit {short}",
+            "Fecha de la última versión del bot y el commit de GitHub que está corriendo."),
+        Kpi("conn", "plug", "Estado de conexión", conn_value, conn_note,
+            "Resultado de la última prueba real de conexiones; si aún no se prueba, cuántas claves de API están configuradas.",
+            tone=conn_tone, go="Inicio", open="Comprobar conexiones reales"),
     ]
-    cells = "".join(
-        f'<div class="kpi {tone}" style="animation-delay:{0.06 * i:.2f}s"><div class="k-top">'
-        f'<span class="k-ic">{icon(ic, 16)}</span><span class="k-lab">{lab}</span></div>'
-        f'<div class="k-val">{html_escape(val)}</div><div class="k-note">{html_escape(note)}</div></div>'
-        for i, (ic, lab, val, note, tone) in enumerate(tiles)
-    )
-    return f'<div class="dpst-kpis">{cells}</div>'
+    a = _asset_stats()
+    if a:
+        result, prices, frequency, stats, dd = a
+        spark = spark_data(prices)
+        base = f"{result.ticker} · {frequency or 'Diaria'} · {stats.n} rendimientos"
+        kpis += [
+            Kpi("ret", "trending", "Rentabilidad (media anual)", f"{stats.mean_annualized:.2%}", base,
+                "Media anualizada de los rendimientos logarítmicos del activo descargado: la misma de Análisis histórico → "
+                "Descriptivos. Es historia, no una promesa.", spark=spark, go=pre, open=hist_mod),
+            Kpi("vol", "activity", "Volatilidad anual", f"{stats.std_annualized:.2%}", base,
+                "Volatilidad anualizada (desviación estándar de los log-rendimientos), la misma de Análisis histórico.",
+                spark=spark, go=pre, open=hist_mod),
+            Kpi("dd", "chart", "Máxima caída", f"{dd:.2%}", f"{result.ticker} · drawdown histórico",
+                "La peor caída desde un máximo anterior en el periodo descargado (Análisis histórico → Drawdown).",
+                go=pre, open=hist_mod),
+        ]
+    else:
+        msg = "Descarga un activo en Preselección para verla"
+        kpis += [
+            Kpi("ret", "trending", "Rentabilidad (media anual)", "—", msg,
+                "Media anualizada de los log-rendimientos del activo que descargues en Preselección.", tone="empty",
+                go=pre, open=data_mod),
+            Kpi("vol", "activity", "Volatilidad anual", "—", msg,
+                "Volatilidad anualizada del activo que descargues en Preselección.", tone="empty", go=pre, open=data_mod),
+            Kpi("dd", "chart", "Máxima caída", "—", msg,
+                "La peor caída desde un máximo anterior del activo que descargues.", tone="empty", go=pre, open=data_mod),
+        ]
+    if events:
+        last = events[-1]
+        kpis.append(Kpi("last", "history", "Último análisis", f"{last['ts'][11:16]} UTC", last["title"],
+                        "El análisis más reciente de esta sesión. La lista completa está en «Últimos análisis».",
+                        go=last.get("go"), open=last.get("open")))
+    else:
+        kpis.append(Kpi("last", "history", "Último análisis", "—", "Aún no hay análisis en esta sesión",
+                        "Aparece cuando descargas un activo, comparas, consultas cotizaciones, haces un backtest o pruebas conexiones.",
+                        tone="empty"))
+    cmp_ = st.session_state.get("comparison_result")
+    if cmp_ is not None and getattr(cmp_, "ok", False):
+        window = (f"{cmp_.common_start.date()} → {cmp_.common_end.date()}"
+                  if cmp_.common_start is not None and cmp_.common_end is not None else "")
+        kpis.append(Kpi("cmp", "scale", "Activos comparados", str(len(cmp_.summaries)),
+                        " · ".join(x for x in (window, cmp_.base_currency or "") if x),
+                        "Activos en la última Comparación y preselección (ventana común y moneda base).",
+                        go=pre, open="Comparación y preselección de activos"))
+    else:
+        kpis.append(Kpi("cmp", "scale", "Activos comparados", "—", "Sin ejecutar · Comparación y preselección",
+                        "Cuántos activos entraron en la Comparación y preselección.", tone="empty",
+                        go=pre, open="Comparación y preselección de activos"))
+    return kpis
+
+
+def _dashboard_assets() -> "list[TrackedAsset]":
+    """Activos con datos reales en la sesión: activo descargado, comparación y cotizaciones del laboratorio."""
+    out: "dict[str, TrackedAsset]" = {}
+
+    def get(t, origin):
+        a = out.setdefault(t, TrackedAsset(ticker=t, origin=origin))
+        if origin not in a.origins:
+            a.origins.append(origin)
+        return a
+
+    stats = _asset_stats()
+    if stats:
+        result, prices, _freq, st_, _dd = stats
+        a = get(result.ticker, "Datos del activo")
+        a.source, a.currency = result.source, result.currency or ""
+        a.last_price, a.last_date = float(prices.iloc[-1]), str(prices.index.max().date())
+        a.mean_annual, a.vol_annual, a.spark = st_.mean_annualized, st_.std_annualized, spark_data(prices)
+    cmp_ = st.session_state.get("comparison_result")
+    if cmp_ is not None and getattr(cmp_, "ok", False):
+        for s in cmp_.summaries:
+            a = get(s.ticker, "Comparación")
+            if a.last_price is None:
+                a.currency, a.last_price, a.last_date = s.currency or "", float(s.last_price), str(s.end_date.date())
+                a.mean_annual, a.vol_annual = s.mean_annual, s.vol_annual
+                a.spark = spark_data((cmp_.common_prices or {}).get(s.ticker))
+    for t, q in (st.session_state.get("lab_last_quotes") or {}).items():
+        if not getattr(q, "ok", False):
+            continue
+        a = get(t, "Cotización en línea")
+        if a.last_price is None:
+            a.currency, a.last_price = q.currency or "", q.price
+            a.last_date = q.last_bar_at.strftime("%Y-%m-%d %H:%M UTC") if q.last_bar_at else ""
+            a.spark = spark_data(q.bars)
+    return list(out.values())
+
+
+def _dashboard_services() -> "list[Service]":
+    log = st.session_state.get("conn_check_log") or []
+    keys = _configured_keys()
+    out = []
+    for name in _connection_checks():
+        rows = [r for r in log if r.get("servicio") == name]
+        if rows:
+            r = rows[-1]
+            out.append(Service(name, "ok" if r.get("estado") == "conectado" else "fail", str(r.get("detalle", "")),
+                               str(r.get("hora (UTC)", ""))[11:16] + " UTC"))
+        else:
+            hint = "Aún sin probar en esta sesión: pulsa «Probar conexiones»."
+            for label, has in keys.items():
+                if name.startswith(label.split()[0]):
+                    hint += f" Clave {label}: {'configurada' if has else 'no configurada'}."
+            out.append(Service(name, "idle", hint))
+    return out
+
+
+_DASH_SLOT = {}
+
+
+def render_dashboard() -> None:
+    """Llena el espacio del dashboard en Inicio al final de la ejecución, cuando ya corrieron todas las pestañas."""
+    slot = _DASH_SLOT.pop("slot", None)
+    if slot is None:
+        return
+    events = track_activity(st.session_state, LAB_TITLE)
+    result = st.session_state.get("asset_result")
+    market = (f" · último dato de mercado <b>{html_escape(result.ticker)} {result.prices.index.max().date()}</b>"
+              if result is not None and getattr(result, "ok", False) and result.prices is not None and len(result.prices) else "")
+    status = f"Datos de esta sesión · bot actualizado <b>{LAST_UPDATE}</b>{market}"
+    with slot:
+        st.markdown(dashboard_html(_dashboard_kpis(events), _dashboard_assets(), events, _dashboard_services(), status),
+                    unsafe_allow_html=True)
 
 
 def _hero_chart_html() -> str:
@@ -2460,7 +2607,8 @@ def render_home(user_name: str, user_email: str) -> None:
     el contenido de la portada anterior; solo cambia la presentación.
     """
     st.markdown(_home_hero_html(), unsafe_allow_html=True)
-    st.markdown(_home_kpis_html(), unsafe_allow_html=True)
+    # Dashboard personalizable: se llena al final de main() (render_dashboard), con todo lo de la sesión.
+    _DASH_SLOT["slot"] = st.container(key="dpst_dashboard")
     st.markdown(
         '<div class="dpst-notice"><b>Este bot no te dice en qué invertir.</b> '
         "Te ayuda a <b>mirar y comparar</b> empresas con datos del pasado, como ejercicio de una clase de la "
