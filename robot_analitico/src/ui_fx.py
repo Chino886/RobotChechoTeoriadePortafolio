@@ -967,6 +967,71 @@ html { font-optical-sizing: auto; }
     .dash-tools { width: 100%; } .dash-tools .dash-btn { flex: 1; justify-content: center; }
 }
 
+/* ===================== Comparación visual (Preselección) ===================== */
+.cmp-panel { margin: 4px 0 10px; }
+.cmp-tools { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.cmp-sort { display: inline-flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--dp-muted); }
+.cmp-sort select { font: inherit; font-size: 0.82rem; padding: 6px 10px; border-radius: 9px; color: var(--dp-ink); background: var(--dp-surface);
+    border: 1px solid rgba(var(--dp-line-rgb), 0.18); cursor: pointer; }
+.cmp-crit { margin-top: 8px; font-size: 0.82rem; color: var(--dp-muted); }
+.cmp-crit b { color: var(--dp-ink); }
+.cmp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-top: 10px; }
+.cmp-card { min-width: 0; padding: 0.85rem 0.9rem 0.75rem; border-radius: 14px; background: var(--dp-surface);
+    border: 1px solid rgba(var(--dp-line-rgb), 0.12); box-shadow: 0 1px 2px rgba(var(--dp-shadow-rgb), calc(0.06 * var(--dp-shadow-k)));
+    transition: transform .22s cubic-bezier(.2,.8,.2,1), border-color .2s, box-shadow .22s; animation: dpst-rise .45s cubic-bezier(.2,.8,.2,1) both;
+    animation-delay: calc(var(--i, 0) * 25ms); position: relative; }
+.cmp-card:hover { transform: translateY(-3px); border-color: rgba(var(--dp-accent-rgb), 0.4); box-shadow: 0 12px 26px rgba(var(--dp-shadow-rgb), calc(0.14 * var(--dp-shadow-k))); }
+.cmp-card[data-state~="sel"] { border-color: rgba(var(--dp-accent-rgb), 0.7); box-shadow: 0 0 0 3px rgba(var(--dp-accent-rgb), 0.12); }
+.cmp-card[data-state~="sel"]::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; border-radius: 14px 14px 0 0; background: linear-gradient(90deg, var(--dp-accent), var(--dp-blue)); }
+.cc-top { display: flex; align-items: center; gap: 10px; }
+.cmp-av { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 0.78rem; font-weight: 700; color: #FFFFFF; background: var(--c); box-shadow: inset 0 -2px 0 rgba(0,0,0,.12); }
+.cc-id { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cc-id b { font-family: 'Geist Mono', ui-monospace, monospace; color: var(--dp-ink); letter-spacing: .02em; }
+.cc-id span { font-size: 0.75rem; color: var(--dp-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-px { display: flex; flex-direction: column; align-items: flex-end; font-family: 'Geist Mono', ui-monospace, monospace; }
+.cc-px b { font-size: 0.9rem; color: var(--dp-ink); font-weight: 600; }
+.cc-px span { font-size: 0.68rem; color: var(--dp-faint); }
+.cmp-card .dash-spark { display: block; width: 100%; height: 34px; margin: 8px 0 4px; }
+.cc-m { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin: 6px 0 0; }
+.cc-m div { min-width: 0; }
+.cc-m dt { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.6rem; letter-spacing: .06em; text-transform: uppercase; color: var(--dp-faint); white-space: nowrap; cursor: help; }
+.cc-m dd { margin: 1px 0 0; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.8rem; color: var(--dp-ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cc-b { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 8px; }
+.cmp-b { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 0.68rem; font-weight: 600; white-space: nowrap; cursor: help; }
+.cmp-b.sel { color: var(--dp-on-accent); background: linear-gradient(180deg, var(--dp-accent-hi), var(--dp-accent-lo)); }
+.cmp-b.nd { color: var(--dp-blue-ink); background: rgba(var(--dp-blue-rgb), 0.12); border: 1px solid rgba(var(--dp-blue-rgb), 0.3); }
+.cmp-b.dom { color: var(--dp-muted); background: rgba(var(--dp-line-rgb), 0.06); }
+.cmp-b.star { color: var(--dp-amber-ink); background: rgba(var(--dp-amber-rgb), 0.12); }
+.cmp-none { padding: 1rem; font-size: 0.88rem; color: var(--dp-muted); }
+.cmp-table { overflow: auto; max-height: 620px; border-radius: 14px; background: var(--dp-surface); border: 1px solid rgba(var(--dp-line-rgb), 0.12); }
+.cmp-table table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.88rem; }
+.cmp-table thead th { position: sticky; top: 0; z-index: 1; text-align: left; padding: 0.7rem 0.8rem; white-space: nowrap; cursor: pointer; user-select: none;
+    font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.68rem; letter-spacing: .08em; text-transform: uppercase; font-weight: 600;
+    color: var(--dp-muted); background: var(--dp-surface-2); border-bottom: 1px solid rgba(var(--dp-line-rgb), 0.12); }
+.cmp-table thead th:hover { color: var(--dp-ink); }
+.cmp-table thead th::after { content: "↕"; margin-left: 5px; opacity: .3; }
+.cmp-table thead th[data-dir="asc"]::after { content: "↑"; opacity: 1; color: var(--dp-accent); }
+.cmp-table thead th[data-dir="desc"]::after { content: "↓"; opacity: 1; color: var(--dp-accent); }
+.cmp-table tbody td { padding: 0.5rem 0.8rem; border-bottom: 1px solid rgba(var(--dp-line-rgb), 0.07); color: var(--dp-text-1); vertical-align: middle; white-space: nowrap; }
+.cmp-table tbody tr { transition: background .2s; }
+.cmp-table tbody tr:hover td { background: rgba(var(--dp-accent-rgb), 0.05); }
+.cmp-table tbody tr[data-state~="sel"] td:first-child { box-shadow: inset 3px 0 0 var(--dp-accent); }
+.cmp-table td.a { display: flex; align-items: center; gap: 10px; min-width: 13rem; }
+.cmp-an { display: flex; flex-direction: column; min-width: 0; }
+.cmp-an b { font-family: 'Geist Mono', ui-monospace, monospace; color: var(--dp-ink); }
+.cmp-an span { font-size: 0.74rem; color: var(--dp-muted); max-width: 14rem; overflow: hidden; text-overflow: ellipsis; }
+.cmp-table td.num, .cmp-val { font-family: 'Geist Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.cmp-cell { position: relative; display: block; min-width: 6.5rem; padding: 3px 6px; }
+.cmp-bar { position: absolute; top: 2px; bottom: 2px; border-radius: 5px; opacity: .22; }
+.cmp-bar.mean { background: #16A34A; } .cmp-bar.mean.neg { background: #DC2626; }
+.cmp-bar.vol { background: #0EA5E9; } .cmp-bar.rvr { background: #2563EB; } .cmp-bar.rvr.neg { background: #DC2626; } .cmp-bar.dd { background: #DC2626; }
+.cmp-val { position: relative; }
+.cmp-table td.best .cmp-val { font-weight: 700; color: var(--dp-ink); }
+.cmp-table td.best .cmp-val::after { content: " ●"; color: var(--dp-accent); font-size: .7em; }
+.cmp-table td.st { display: table-cell; }
+@media (max-width: 560px) { .cmp-cards { grid-template-columns: minmax(0, 1fr); } .cmp-tools { flex-direction: column; align-items: stretch; } }
+
 @media (prefers-reduced-motion: reduce) {
     [data-testid="stMainBlockContainer"] * { animation: none !important; }
     .dash-spark .l { stroke-dashoffset: 0; }
@@ -1561,6 +1626,47 @@ _FX_JS = r"""
   let dashT;
   new P.MutationObserver(() => { clearTimeout(dashT); dashT = setTimeout(setupDash, 80); }).observe(D.body, { childList: true, subtree: true });
   setupDash();
+
+  /* ---------- Comparación visual: filtrar/ordenar tarjetas y ordenar la tabla (solo vista) ---------- */
+  const cmpView = { filter: 'all', sort: '' };
+  function cmpApply(panel) {
+    panel.querySelectorAll('[data-cmp-filter] .dash-chip').forEach(c => c.setAttribute('aria-pressed', c.dataset.val === cmpView.filter ? 'true' : 'false'));
+    const sel = panel.querySelector('[data-cmp-sort]'); if (sel && sel.value !== cmpView.sort) sel.value = cmpView.sort;
+    const grid = panel.querySelector('.cmp-cards'); if (!grid) return;
+    const cards = [...grid.children];
+    cards.forEach((c, i) => { if (c.dataset.o == null) c.dataset.o = i; });
+    const k = cmpView.sort, asc = k === 'vol';   // σ: menor primero; el resto: mayor primero (drawdown más cercano a 0)
+    const val = c => (c.dataset[k] === '' || c.dataset[k] == null) ? null : Number(c.dataset[k]);
+    const sorted = cards.slice().sort((a, b) => {
+      if (!k) return a.dataset.o - b.dataset.o;
+      const x = val(a), y = val(b);
+      if (x == null) return 1; if (y == null) return -1;
+      return asc ? x - y : y - x;
+    });
+    flip(grid, () => sorted.forEach(c => grid.appendChild(c)));
+    let shown = 0;
+    cards.forEach(c => { const ok = cmpView.filter === 'all' || (c.dataset.state || '').split(' ').includes(cmpView.filter); c.style.display = ok ? '' : 'none'; if (ok) shown++; });
+    const none = panel.querySelector('.cmp-none'); if (none) none.hidden = shown > 0;
+  }
+  D.addEventListener('click', e => {
+    const chip = e.target && e.target.closest ? e.target.closest('[data-cmp-filter] .dash-chip') : null;
+    if (chip) { cmpView.filter = chip.dataset.val; cmpApply(chip.closest('.cmp-panel')); return; }
+    const th = e.target && e.target.closest ? e.target.closest('.cmp-table th[data-sort]') : null;
+    if (!th) return;
+    const tbody = th.closest('table').querySelector('tbody'), col = +th.dataset.sort;
+    const dir = th.dataset.dir === 'desc' ? 'asc' : 'desc';
+    th.closest('tr').querySelectorAll('th').forEach(x => delete x.dataset.dir); th.dataset.dir = dir;
+    const v = r => { const c = r.cells[col]; const s = c ? c.dataset.v : ''; const n = Number(s); return s !== '' && !isNaN(n) ? n : (c ? c.textContent.trim() : ''); };
+    const rows = [...tbody.rows].sort((a, b) => { const x = v(a), y = v(b); const r = (typeof x === 'number' && typeof y === 'number') ? x - y : String(x).localeCompare(String(y), 'es', { numeric: true }); return dir === 'asc' ? r : -r; });
+    rows.forEach(r => tbody.appendChild(r));
+  });
+  D.addEventListener('change', e => {
+    const sel = e.target && e.target.closest ? e.target.closest('[data-cmp-sort]') : null;
+    if (sel) { cmpView.sort = sel.value; cmpApply(sel.closest('.cmp-panel')); }
+  });
+  let cmpT;
+  new P.MutationObserver(() => { clearTimeout(cmpT); cmpT = setTimeout(() => D.querySelectorAll('.cmp-panel:not([data-ready])').forEach(p => { p.dataset.ready = '1'; cmpApply(p); }), 90); })
+    .observe(D.body, { childList: true, subtree: true });
 
   /* ---------- carrusel de noticias de Inicio ----------
      Pasa solo cada N segundos (se pausa con el mouse encima, con el foco dentro, con el botón

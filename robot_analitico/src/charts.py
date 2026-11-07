@@ -40,6 +40,15 @@ _template.layout.xaxis.update(showspikes=True, spikemode="across", spikesnap="cu
 _template.data.scatter = [go.Scatter(line=dict(width=2.2))]
 pio.templates["dpst"] = _template
 
+# Barra de herramientas de Plotly (zoom, desplazar, restaurar vista, descargar PNG) en español.
+PLOTLY_CONFIG = {
+    "displaylogo": False,
+    "locale": "es",
+    "scrollZoom": False,
+    "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"],
+    "toImageButtonOptions": {"format": "png", "filename": "dpst_grafico", "scale": 2},
+}
+
 PRESELECTION_CHART_HEIGHT = 460  # precio, rendimientos y pronóstico: gráficas más grandes
 
 DARK_LAYOUT = dict(
@@ -160,6 +169,7 @@ def risk_return_map(summaries, non_dominated, starred_ticker: "str | None" = Non
                 text=[s.ticker for s in dominated],
                 textposition="top center",
                 name="Dominado",
+                hovertemplate="<b>%{text}</b><br>Volatilidad σ: %{x:.2%}<br>Media ḡ: %{y:.2%}<extra>%{fullData.name}</extra>",
                 marker=dict(size=10, color="rgba(106, 168, 255, 0.55)"),
             )
         )
@@ -172,6 +182,7 @@ def risk_return_map(summaries, non_dominated, starred_ticker: "str | None" = Non
                 text=[s.ticker for s in frontier],
                 textposition="top center",
                 name="No dominado",
+                hovertemplate="<b>%{text}</b><br>Volatilidad σ: %{x:.2%}<br>Media ḡ: %{y:.2%}<extra>%{fullData.name}</extra>",
                 marker=dict(size=13, color=ACCENT_GOLD, symbol="diamond"),
             )
         )
@@ -185,6 +196,7 @@ def risk_return_map(summaries, non_dominated, starred_ticker: "str | None" = Non
                 text=[starred[0].ticker],
                 textposition="bottom center",
                 name="Tu elección",
+                hovertemplate="<b>%{text}</b><br>Volatilidad σ: %{x:.2%}<br>Media ḡ: %{y:.2%}<extra>%{fullData.name}</extra>",
                 marker=dict(size=18, symbol="star", color=STAR_WHITE),
             )
         )
@@ -194,6 +206,9 @@ def risk_return_map(summaries, non_dominated, starred_ticker: "str | None" = Non
         yaxis_title="Media histórica logarítmica anualizada (ḡ)",
         margin=dict(t=60, b=40, l=40, r=20),
         height=PRESELECTION_CHART_HEIGHT,
+        xaxis_tickformat=".1%",
+        yaxis_tickformat=".1%",
+        legend=dict(orientation="h", yanchor="top", y=-0.14, x=0),
         **DARK_LAYOUT,
     )
     return fig
