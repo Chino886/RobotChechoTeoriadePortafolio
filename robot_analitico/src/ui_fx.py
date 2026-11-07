@@ -635,6 +635,62 @@ html { font-optical-sizing: auto; }
     .st-key-ps_modules details[open] > summary::after { content: none; }
 }
 
+/* ===== Tasas soberanas ===== */
+.rs-status { display: flex; flex-wrap: wrap; gap: 8px; margin: 0.6rem 0 0.6rem; }
+.rs-pill { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: 999px; font-size: 0.8rem; font-weight: 500;
+    color: #C6D0E2; background: rgba(18, 26, 43, 0.85); border: 1px solid rgba(148, 170, 210, 0.18); }
+.rs-pill svg { color: #6AA8FF; }
+.rs-pill i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.rs-pill.ok { color: #BDEFDF; border-color: rgba(52, 201, 160, 0.4); background: rgba(52, 201, 160, 0.10); }
+.rs-pill.ok i { background: #34C9A0; box-shadow: 0 0 8px #34C9A0; animation: dpst-pulse 2.4s infinite; }
+.rs-pill.warn { color: #F7D08A; border-color: rgba(245, 184, 75, 0.4); background: rgba(245, 184, 75, 0.08); }
+.rs-pill.warn i { background: #F5B84B; box-shadow: 0 0 8px #F5B84B; }
+.rs-source { display: flex; gap: 10px; align-items: flex-start; padding: 0.8rem 1rem; border-radius: 14px; margin-bottom: 1rem;
+    color: #94A1BA; font-size: 0.86rem; line-height: 1.55; background: rgba(14, 21, 38, 0.6); border: 1px solid rgba(148, 170, 210, 0.12); }
+.rs-source svg { color: #6AA8FF; margin-top: 2px; }
+.rs-nokey { display: flex; gap: 20px; align-items: flex-start; padding: 1.6rem 1.7rem; border-radius: 22px; margin-bottom: 14px;
+    border: 1px dashed rgba(106, 168, 255, 0.45); background: radial-gradient(500px 200px at 0% 0%, rgba(106,168,255,.12), transparent 70%), rgba(14, 21, 38, 0.7);
+    animation: dpst-rise .6s cubic-bezier(.2,.8,.2,1) both; }
+.rs-nokey .nk-ic { flex: none; width: 60px; height: 60px; border-radius: 18px; display: grid; place-items: center; color: #9CC4FF;
+    background: rgba(106, 168, 255, 0.12); border: 1px solid rgba(106, 168, 255, 0.35); }
+.rs-nokey .nk-t { font-family: 'Instrument Serif', Georgia, serif; font-size: 1.9rem; line-height: 1.1; color: #E8EDF6; }
+.rs-nokey .nk-b { color: #AEB9CE; margin-top: 0.4rem; }
+.rs-nokey .nk-steps { margin: 0.9rem 0 0; padding-left: 1.2rem; color: #C6D0E2; font-size: 0.92rem; line-height: 1.75; }
+.rs-nokey code { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.82rem; color: #BDEFDF; background: rgba(52,201,160,.10); padding: 1px 6px; border-radius: 6px; }
+.rs-nokey .nk-btn { display: inline-flex; align-items: center; gap: 8px; margin-top: 1rem; padding: 10px 16px; border-radius: 10px; font-weight: 600; font-size: 0.9rem;
+    color: #0A0F1C !important; text-decoration: none !important; background: linear-gradient(180deg, #9CC4FF, #4F8FEA); box-shadow: 0 8px 22px rgba(106,168,255,.25);
+    transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s; }
+.rs-nokey .nk-btn:hover { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(106,168,255,.35); }
+.rs-nokey .nk-btn:active { transform: scale(.97); }
+.rs-illus { padding: 1.1rem 1.3rem 1rem; border-radius: 20px; border: 1px solid rgba(148, 170, 210, 0.14); background: rgba(10, 15, 28, 0.6); animation: dpst-rise .7s cubic-bezier(.2,.8,.2,1) .1s both; }
+.rs-illus .ri-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 0.4rem; }
+.rs-illus .ri-t { font-weight: 600; color: #E8EDF6; }
+.rs-illus > svg { width: 100%; height: auto; max-height: 280px; display: block; }
+.rs-illus > svg .g line { stroke: rgba(148, 170, 210, 0.10); }
+.rs-illus > svg .l { stroke-dasharray: 900; animation: dpst-draw 2s cubic-bezier(.6,.1,.2,1) .2s both; }
+.rs-illus > svg circle { fill: #0A0F1C; stroke: #6AA8FF; stroke-width: 2.4; animation: dpst-fade .4s ease 1.8s both; }
+.rs-illus .ri-x { display: flex; justify-content: space-between; padding: 0 2% 0 6%; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.72rem; color: #8C99B3; }
+.rs-illus .ri-note { margin-top: 0.8rem; color: #94A1BA; font-size: 0.86rem; line-height: 1.55; }
+.rs-illus .c-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.68rem;
+    color: #F7D08A; background: rgba(245, 184, 75, 0.08); border: 1px solid rgba(245, 184, 75, 0.35); }
+.rs-edus { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.rs-edu { padding: 1rem 1.1rem; border-radius: 16px; border: 1px solid rgba(148, 170, 210, 0.14); background: rgba(18, 26, 43, 0.7);
+    transition: border-color .25s, transform .35s cubic-bezier(.2,.8,.2,1); animation: dpst-rise .6s cubic-bezier(.2,.8,.2,1) both; }
+.rs-edu:hover { border-color: rgba(106, 168, 255, 0.45); transform: translateY(-3px); }
+.rs-edu .e-ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: #9CC4FF; background: rgba(106,168,255,.12); border: 1px solid rgba(106,168,255,.3); }
+.rs-edu .e-t { margin-top: 0.7rem; font-weight: 600; color: #E8EDF6; font-size: 0.95rem; }
+.rs-edu .e-d { margin-top: 0.3rem; color: #94A1BA; font-size: 0.85rem; line-height: 1.5; }
+.st-key-rates_controls { padding: 0.3rem 1.2rem 1rem; border-radius: 20px; border: 1px solid rgba(148, 170, 210, 0.14);
+    background: linear-gradient(180deg, rgba(18, 26, 43, 0.85), rgba(14, 21, 38, 0.7)); margin-bottom: 0.8rem; }
+.st-key-rates_controls .dpst-label { margin-top: 0.9rem; }
+.st-key-rates_controls [data-baseweb="tag"] { background: rgba(106, 168, 255, 0.16) !important; border: 1px solid rgba(106, 168, 255, 0.35); border-radius: 8px !important; }
+.st-key-rates_kpis [data-testid="stMetricValue"] { font-size: 1.7rem; }
+.rs-table { max-height: 420px; }
+.rs-table td.num, .rs-table th.num { text-align: right; font-family: 'Geist Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.rs-table tbody tr { cursor: default; }
+@media (max-width: 1000px) { .rs-edus { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .rs-edus { grid-template-columns: minmax(0, 1fr); } .rs-nokey { flex-direction: column; } }
+
 /* El componente invisible que carga los efectos no debe ocupar espacio. */
 [data-testid="stElementContainer"]:has(> iframe[title="st.iframe"][height="0"]),
 [data-testid="stElementContainer"]:has(iframe[height="0"]) { display: none; }

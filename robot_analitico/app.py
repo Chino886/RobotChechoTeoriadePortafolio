@@ -25,7 +25,9 @@ from src.analytics import (
     run_diagnostics,
 )
 from src.auth import is_auth_configured, require_login
-from src.charts import forecast_chart, price_chart, return_chart, risk_return_map
+import plotly.graph_objects as go
+
+from src.charts import DARK_LAYOUT, forecast_chart, price_chart, return_chart, risk_return_map
 from src.comparison import (
     MIN_COMPARISON_ASSETS,
     build_comparison,
@@ -1202,6 +1204,70 @@ def render_comparison() -> None:
                 file_name="parametros_comparacion.json",
                 mime="application/json",
             )
+RATES_SOURCE_TEXT = (
+    "Fuente: FRED (Federal Reserve Economic Data, Banco de la Reserva "
+    "Federal de St. Louis). La lista de países se pide en vivo a FRED: aparecen "
+    "los que tienen la tasa a 10 años de la OCDE o, si no, la de bonos del gobierno del FMI."
+)
+FRED_KEY_DOCS_URL = "https://fred.stlouisfed.org/docs/api/api_key.html"
+
+# Tarjetas educativas de la sección (texto conceptual, sin cifras).
+RATES_EDU_CARDS = [
+    ("landmark", "¿Qué es una tasa soberana?",
+     "Lo que paga el gobierno de un país por pedir dinero prestado con bonos. Es la referencia de un "
+     "rendimiento de bajo riesgo en ese país."),
+    ("clock", "¿Qué representa el rendimiento a 10 años?",
+     "El interés anual que el mercado exige para prestarle al gobierno por diez años. Resume expectativas de "
+     "inflación, crecimiento y riesgo del país."),
+    ("curve", "¿Qué es una curva de rendimiento?",
+     "La línea que une las tasas de un mismo gobierno a distintos plazos (2, 5, 10, 30 años). Su forma "
+     "muestra cómo cambia el interés según el plazo."),
+    ("scale", "¿Para qué sirve en DPST?",
+     "Es un punto de comparación: ayuda a elegir la tasa libre de riesgo del Laboratorio y a contrastar lo que "
+     "rinde un activo frente a prestarle al gobierno."),
+]
+
+
+def _rates_status_html(connected: bool, n_countries: "int | None" = None) -> str:
+    """Franja de estado: fuente, conexión y países disponibles (solo lo que ya se sabe)."""
+    conn = ('<span class="rs-pill ok"><i></i>FRED conectado</span>' if connected
+            else '<span class="rs-pill warn"><i></i>FRED sin API key</span>')
+    countries = (f'<span class="rs-pill">{icon("globe", 13)}{n_countries} países con dato</span>'
+                 if n_countries else "")
+    return (f'<div class="rs-status">{conn}<span class="rs-pill">{icon("database", 13)}Federal Reserve Economic Data'
+            f'</span>{countries}</div><div class="rs-source">{icon("info", 15)}<span>{html_escape(RATES_SOURCE_TEXT)}'
+            '</span></div>')
+
+
+def _rates_illustrative_curve_html() -> str:
+    """Esquema de una curva de rendimiento. Sin cifras: rotulado como vista ilustrativa."""
+    return (
+        '<div class="rs-illus"><div class="ri-head"><span class="ri-t">¿Cómo se lee una curva de rendimiento?</span>'
+        f'<span class="c-badge demo">{icon("info", 12)}Vista ilustrativa — no representa tasas reales ni datos de mercado</span></div>'
+        '<svg viewBox="0 0 600 220" preserveAspectRatio="xMidYMid meet" aria-hidden="true">'
+        '<defs><linearGradient id="rsFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#6AA8FF" stop-opacity=".28"/>'
+        '<stop offset="100%" stop-color="#6AA8FF" stop-opacity="0"/></linearGradient></defs>'
+        '<g class="g"><line x1="40" x2="580" y1="40" y2="40"/><line x1="40" x2="580" y1="100" y2="100"/>'
+        '<line x1="40" x2="580" y1="160" y2="160"/></g>'
+        '<path class="a" d="M60,170 C160,150 240,120 330,95 S500,52 560,42 L560,190 L60,190 Z" fill="url(#rsFill)"/>'
+        '<path class="l" d="M60,170 C160,150 240,120 330,95 S500,52 560,42" fill="none" stroke="#6AA8FF" stroke-width="2.4"/>'
+        '<circle cx="60" cy="170" r="5"/><circle cx="200" cy="138" r="5"/><circle cx="330" cy="95" r="5"/><circle cx="560" cy="42" r="5"/>'
+        '</svg><div class="ri-x"><span>Corto plazo</span><span>Mediano</span><span>10 años</span><span>Largo plazo</span></div>'
+        '<div class="ri-note">Cada punto sería la tasa del mismo gobierno a un plazo distinto. Una curva que sube con el '
+        'plazo es la forma «normal»; si se invierte, el mercado espera tasas más bajas en el futuro. En DPST, FRED entrega '
+        'la tasa a 10 años de cada país.</div></div>'
+    )
+
+
+def _rates_edu_cards_html() -> str:
+    cards = "".join(
+        f'<div class="rs-edu" style="animation-delay:{0.06 * i:.2f}s"><span class="e-ic">{icon(ic, 18)}</span>'
+        f'<div class="e-t">{html_escape(t)}</div><div class="e-d">{html_escape(d)}</div></div>'
+        for i, (ic, t, d) in enumerate(RATES_EDU_CARDS)
+    )
+    return f'{section_label_html("Conceptos clave", "info")}<div class="rs-edus">{cards}</div>'
+
+
 def render_sovereign_rates() -> None:
     """
     Tasas de bonos soberanos a 10 años por país, vía la API de FRED.
@@ -1209,52 +1275,94 @@ def render_sovereign_rates() -> None:
     activos de arriba: no entra en el mapa de dominancia ni en la
     preselección (RF-19 a RF-22), es solo información de contexto.
     """
-    st.caption(
-        "Fuente: FRED (Federal Reserve Economic Data, Banco de la Reserva "
-        "Federal de St. Louis). La lista de países se pide en vivo a FRED: aparecen "
-        "los que tienen la tasa a 10 años de la OCDE o, si no, la de bonos del gobierno del FMI."
-    )
-
     try:
         fred_api_key = st.secrets.get("FRED_API_KEY")
     except Exception:  # sin secrets.toml, st.secrets lanza en vez de devolver None
         fred_api_key = None
     if not fred_api_key:
-        st.info(
-            "Esta vista necesita una API key gratuita de FRED configurada en "
-            "los secretos de la app (FRED_API_KEY) para funcionar."
+        st.markdown(_rates_status_html(False), unsafe_allow_html=True)
+        st.markdown(
+            '<div class="rs-nokey"><div class="nk-ic">' + icon("key", 26) + '</div><div class="nk-tx">'
+            '<div class="nk-t">Conecta FRED para ver las tasas reales</div>'
+            '<div class="nk-b">Esta vista necesita una API key gratuita de FRED configurada en los secretos de la app '
+            '(FRED_API_KEY) para funcionar.</div>'
+            '<ol class="nk-steps"><li>Pide la clave gratuita en la página de FRED.</li>'
+            '<li>Agrégala como <code>FRED_API_KEY = "…"</code> en <code>.streamlit/secrets.toml</code> (en tu PC) o en '
+            '<b>Settings → Secrets</b> (en Streamlit Cloud).</li><li>Recarga la app: aparecen los países y sus tasas.</li></ol>'
+            f'<a class="nk-btn" href="{FRED_KEY_DOCS_URL}" target="_blank" rel="noopener noreferrer">Cómo obtener la API key '
+            f'{icon("external", 14)}</a></div></div>',
+            unsafe_allow_html=True,
         )
+        st.markdown(_rates_illustrative_curve_html(), unsafe_allow_html=True)
+        st.markdown(_rates_edu_cards_html(), unsafe_allow_html=True)
         return
 
     try:
         countries = _fred_countries(fred_api_key)
     except Exception as exc:
         countries = []
+        st.markdown(_rates_status_html(True), unsafe_allow_html=True)
         st.error(f"No se pudo obtener de FRED la lista de países: {exc}")
     if not countries:
         _render_rates_free_search(fred_api_key)
         return
 
+    st.markdown(_rates_status_html(True, len(countries)), unsafe_allow_html=True)
     labels = [c["label"] for c in countries]
     by_label = {c["label"]: c for c in countries}
     default = labels.index("Colombia") if "Colombia" in labels else 0
-    col_c, col_s, col_e = st.columns([2, 1, 1])
-    with col_c:
-        label = st.selectbox(
-            f"País ({len(countries)} con dato en FRED)", labels, index=default, key="rates_country",
-            format_func=lambda x: f"{x} · datos hasta {by_label[x]['observation_end'][:4]}"
-            if _is_stale(by_label[x]["observation_end"]) else x,
-            help="Los países que tienen en FRED una tasa de bonos del gobierno. Escoge uno y aparece su tasa.",
-        )
-    with col_s:
-        rates_start = st.date_input("Fecha inicial", value=pd.Timestamp("2015-01-01"), key="rates_start")
-    with col_e:
-        rates_end = st.date_input("Fecha final", value=pd.Timestamp.today(), key="rates_end")
+    with st.container(key="rates_controls"):
+        st.markdown(section_label_html("Selección", "sliders"), unsafe_allow_html=True)
+        col_c, col_s, col_e = st.columns([2, 1, 1])
+        with col_c:
+            label = st.selectbox(
+                f"País ({len(countries)} con dato en FRED)", labels, index=default, key="rates_country",
+                format_func=lambda x: f"{x} · datos hasta {by_label[x]['observation_end'][:4]}"
+                if _is_stale(by_label[x]["observation_end"]) else x,
+                help="Los países que tienen en FRED una tasa de bonos del gobierno. Escoge uno y aparece su tasa.",
+            )
+        with col_s:
+            rates_start = st.date_input("Fecha inicial", value=pd.Timestamp("2015-01-01"), key="rates_start")
+        with col_e:
+            rates_end = st.date_input("Fecha final", value=pd.Timestamp.today(), key="rates_end")
+        compare = st.multiselect(
+            "Comparar con otros países (opcional)", [x for x in labels if x != label], key="rates_compare",
+            max_selections=4,
+            help="Dibuja en la misma gráfica la tasa de otros países, con la misma consulta a FRED. Vacío = solo el país elegido.")
 
-    _render_rate_series(fred_api_key, by_label[label], label, rates_start, rates_end)
+    _render_rate_series(fred_api_key, by_label[label], label, rates_start, rates_end,
+                        compare=[by_label[x] for x in compare if x in by_label])
+    st.markdown(_rates_edu_cards_html(), unsafe_allow_html=True)
 
 
-def _render_rate_series(fred_api_key: str, info: dict, label: str, rates_start, rates_end) -> None:
+def _rates_chart(series_by_label: "dict[str, pd.Series]") -> go.Figure:
+    """Gráfica grande con la(s) serie(s) reales de FRED; el primer país va resaltado."""
+    fig = go.Figure()
+    for i, (name, s) in enumerate(series_by_label.items()):
+        fig.add_trace(go.Scatter(
+            x=s.index, y=s.values, mode="lines", name=f"{name} (%)",
+            line=dict(width=2.6 if i == 0 else 1.8),
+            fill="tozeroy" if (i == 0 and len(series_by_label) == 1) else None,
+            fillcolor="rgba(52, 201, 160, 0.10)",
+            hovertemplate="%{y:.2f}%<extra>" + name + "</extra>",
+        ))
+    fig.update_layout(
+        height=460, hovermode="x unified", margin=dict(t=56, b=40, l=50, r=20),
+        yaxis_title="Tasa (% anual)", xaxis_title=None,
+        legend=dict(orientation="h", y=-0.12, x=0, yanchor="top"),
+        xaxis=dict(rangeselector=dict(
+            buttons=[dict(count=1, label="1A", step="year", stepmode="backward"),
+                     dict(count=5, label="5A", step="year", stepmode="backward"),
+                     dict(step="all", label="Todo")],
+            bgcolor="rgba(18,26,43,0.9)", activecolor="rgba(52,201,160,0.35)", bordercolor="rgba(148,170,210,0.2)",
+            borderwidth=1, font=dict(color="#E8EDF6", size=11), x=0, xanchor="left", y=1.1, yanchor="bottom")),
+        **DARK_LAYOUT,
+    )
+    return fig
+
+
+def _render_rate_series(fred_api_key: str, info: dict, label: str, rates_start, rates_end,
+                        compare: "list[dict] | None" = None) -> None:
     """Tasa actual, cambio en 12 meses, gráfica y tabla de la serie elegida."""
     with st.spinner(f"Descargando de FRED la tasa de {label}..."):
         try:
@@ -1266,19 +1374,48 @@ def _render_rate_series(fred_api_key: str, info: dict, label: str, rates_start, 
         st.warning(f"FRED no tiene observaciones de {label} entre esas fechas (último dato: {info['observation_end']}).")
         return
 
-    m1, m2, m3 = st.columns(3)
-    rate_name = "Tasa a 10 años" if info["source"] == "OCDE" else "Tasa de bonos del gobierno"
-    m1.metric(f"{rate_name} · {label}", f"{series.iloc[-1]:.2f}%")
-    m2.metric("Fecha del último dato", str(series.index[-1].date()))
-    year_ago = series[series.index <= series.index[-1] - pd.DateOffset(years=1)]
-    if not year_ago.empty:
-        m3.metric("Cambio en 12 meses", f"{series.iloc[-1] - year_ago.iloc[-1]:+.2f} p.p.")
-    st.line_chart(series.rename(f"{label} (%)"), height=280)
+    with st.container(key="rates_kpis"):
+        m1, m2, m3, m4 = st.columns(4)
+        rate_name = "Tasa a 10 años" if info["source"] == "OCDE" else "Tasa de bonos del gobierno"
+        m1.metric(f"{rate_name} · {label}", f"{series.iloc[-1]:.2f}%")
+        m2.metric("Fecha del último dato", str(series.index[-1].date()))
+        year_ago = series[series.index <= series.index[-1] - pd.DateOffset(years=1)]
+        if not year_ago.empty:
+            m3.metric("Cambio en 12 meses", f"{series.iloc[-1] - year_ago.iloc[-1]:+.2f} p.p.")
+        m4.metric("Serie de FRED", info["id"], help=f"{len(series)} observaciones en el periodo elegido.")
+
+    series_by_label = {label: series}
+    for other in compare or []:
+        try:
+            s = _fred_series(fred_api_key, other["id"], rates_start, rates_end)
+        except Exception as exc:
+            st.warning(f"No se pudo descargar la serie de {other['label']}: {exc}")
+            continue
+        if not s.empty:
+            series_by_label[other["label"]] = s
+
+    st.markdown(section_label_html("Evolución de la tasa", "chart"), unsafe_allow_html=True)
+    st.plotly_chart(_rates_chart(series_by_label), use_container_width=True)
     st.caption(f"Fuente: {info['source']} vía FRED, {info['detail']}; serie {info['frequency']} en % anual. "
                f"Código **{info['id']}** — {info['title']}.")
     if _is_stale(info["observation_end"]):
         st.warning(f"El último dato de {label} en FRED es de {info['observation_end'][:7]}: es una referencia histórica, "
                    "no la tasa actual.")
+
+    if len(series_by_label) > 1:
+        rows = "".join(
+            f'<tr><td class="tk"><b>{html_escape(name)}</b></td><td class="num">{s.iloc[-1]:.2f}%</td>'
+            f'<td class="num">{s.index[-1].date()}</td><td class="num">{len(s)}</td></tr>'
+            for name, s in series_by_label.items())
+        st.markdown(section_label_html("Comparación · último dato de cada país", "scale")
+                    + '<div class="tk-table rs-table"><table><thead><tr><th>País</th><th class="num">Última tasa</th>'
+                    f'<th class="num">Fecha</th><th class="num">Observaciones</th></tr></thead><tbody>{rows}</tbody></table></div>',
+                    unsafe_allow_html=True)
+    recent = series.tail(12).iloc[::-1]
+    rows = "".join(f'<tr><td class="num">{d.date()}</td><td class="num"><b>{v:.2f}%</b></td></tr>' for d, v in recent.items())
+    st.markdown(section_label_html(f"Últimas observaciones · {label}", "clock")
+                + '<div class="tk-table rs-table"><table><thead><tr><th class="num">Fecha</th><th class="num">Tasa (%)</th>'
+                f'</tr></thead><tbody>{rows}</tbody></table></div>', unsafe_allow_html=True)
     with st.expander("Ver datos en tabla"):
         st.dataframe(series.rename("tasa_%"))
 
@@ -1342,7 +1479,7 @@ def _render_rates_free_search(fred_api_key: str) -> None:
     if series.empty:
         st.warning("No se encontraron observaciones válidas para ese rango de fechas.")
         return
-    st.line_chart(series, height=250)
+    st.plotly_chart(_rates_chart({series_id: series}), use_container_width=True)
     st.metric("Última tasa disponible", f"{series.iloc[-1]:.2f}%", help=f"Fecha: {series.index[-1].date()}")
 
 
@@ -1921,8 +2058,10 @@ def main() -> None:
         with tab_pre:
             render_preselection_page()
         with tab_rates:
-            _page_title("Tasas de bonos soberanos",
-                        "Referencia macroeconómica por país (FRED). No entra en la preselección ni en el laboratorio.")
+            st.markdown(page_header_html(
+                "Renta fija · Macro", "Tasas de bonos soberanos",
+                "Referencia macroeconómica por país (FRED). No entra en la preselección ni en el laboratorio.",
+                "landmark"), unsafe_allow_html=True)
             render_sovereign_rates()
         with tab_lab:
             _page_title(LAB_TITLE,
