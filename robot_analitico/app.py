@@ -583,6 +583,7 @@ def render_historical_analysis() -> None:
 
     st.latex(r"g_t = \ln\left(\frac{P_t}{P_{t-1}}\right)")
 
+    st.markdown(section_label_html("Resultados", "chart"), unsafe_allow_html=True)
     tab_price, tab_returns, tab_stats, tab_diag = st.tabs(
         ["Precio", "Rendimientos", "Descriptivos", "Diagnósticos"]
     )
@@ -729,6 +730,7 @@ def render_forecast() -> None:
         "todas formas y deben leerse como condicionales a ese supuesto."
     )
 
+    st.markdown(section_label_html("Parámetros", "sliders"), unsafe_allow_html=True)
     col_model, col_h_mode = st.columns(2)
     with col_model:
         model_label = st.selectbox("Modelo", list(FORECAST_MODELS.keys()), key="forecast_model")
@@ -786,6 +788,7 @@ def render_forecast() -> None:
             "todos los cuantiles coinciden con la mediana."
         )
 
+    st.markdown(section_label_html("Resultados", "trending"), unsafe_allow_html=True)
     tab_traj, tab_terminal, tab_wf, tab_risk = st.tabs(
         ["Trayectoria 1..H", "Distribución terminal", "Validación walk-forward", "Riesgo y niveles"]
     )
@@ -967,6 +970,7 @@ def render_comparison() -> None:
         height=80,
     )
 
+    st.markdown(section_label_html("Parámetros", "sliders"), unsafe_allow_html=True)
     col1, col2, col3 = st.columns(3)
     with col1:
         start_date = st.date_input("Fecha inicial", value=pd.Timestamp("2023-01-01"), key="comparison_start")
@@ -1063,6 +1067,7 @@ def render_comparison() -> None:
     non_dominated = non_dominated_tickers(result.summaries)
     table = comparison_table(result, non_dominated)
 
+    st.markdown(section_label_html("Resultados", "scale"), unsafe_allow_html=True)
     tab_table, tab_map, tab_select, tab_export = st.tabs(
         ["Tabla comparativa", "Mapa histórico", "Preselección", "Exportar"]
     )
@@ -1369,6 +1374,7 @@ def render_portfolio_forecast() -> None:
         height=100,
     )
 
+    st.markdown(section_label_html("Parámetros", "sliders"), unsafe_allow_html=True)
     col1, col2, col3 = st.columns(3)
     with col1:
         pf_start = st.date_input("Fecha inicial", value=pd.Timestamp("2023-01-01"), key="pf_start")
@@ -2425,6 +2431,7 @@ def _need_asset() -> bool:
 def render_asset_data() -> None:
     """Datos: probar un activo (RF-05 a RF-07)."""
     st.caption("Requisitos RF-05 a RF-07")
+    st.markdown(section_label_html("Parámetros", "sliders"), unsafe_allow_html=True)
     col1, col2, col3, col4 = st.columns([1, 1, 1, 1.4])
     with col1:
         st.session_state.setdefault("asset_ticker", "AAPL")
@@ -2455,6 +2462,7 @@ def render_asset_data() -> None:
     # El resumen queda visible aunque se abran o cierren otras secciones.
     result = st.session_state.get("asset_result")
     if result is not None and result.ok:
+        st.markdown(section_label_html("Resultado", "check"), unsafe_allow_html=True)
         st.success(
             f"{result.ticker}: {len(result.prices)} observaciones · "
             f"fuente: {result.source} · moneda: {result.currency or 'N/D'} · "
@@ -2471,27 +2479,71 @@ def render_asset_data() -> None:
             st.dataframe(result.prices.tail(20))
 
 
+# Módulos de Preselección: título del desplegable, ícono (Material) e ícono del panel de estado.
+PRESELECTION_MODULES = [
+    ("Datos del activo a probar", ":material/database:", "database"),
+    ("Análisis histórico", ":material/monitoring:", "chart"),
+    ("Pronóstico", ":material/trending_up:", "trending"),
+    ("Comparación y preselección de activos", ":material/compare_arrows:", "scale"),
+    ("Pronóstico por canasta de inversión (USD por activo)", ":material/shopping_basket:", "basket"),
+]
+
+
+def _preselection_status_html() -> str:
+    """Estado de cada módulo según lo que ya hay en la sesión (no calcula nada)."""
+    result = st.session_state.get("asset_result")
+    has_asset = result is not None and getattr(result, "ok", False)
+    comparison = st.session_state.get("comparison_result")
+    has_cmp = comparison is not None and getattr(comparison, "ok", False)
+    freq = st.session_state.get("asset_frequency")
+    states = [
+        ("ok", f"{result.ticker} · {len(result.prices)} obs." + (f" · {freq}" if freq else "")) if has_asset
+        else ("todo", "Pendiente: descarga un activo"),
+        ("ready", f"Listo para {result.ticker}") if has_asset else ("wait", "Necesita los datos del activo"),
+        ("ready", f"Listo para {result.ticker}") if has_asset else ("wait", "Necesita los datos del activo"),
+        ("ok", f"{len(comparison.summaries)} activos comparados") if has_cmp else ("todo", "Sin ejecutar"),
+        ("todo", "Se calcula al pulsar «Pronosticar canasta»"),
+    ]
+    names = ["Datos", "Análisis histórico", "Pronóstico", "Comparación", "Canasta"]
+    cells = "".join(
+        f'<button type="button" class="ps-mod {state}" data-dpst-go="Preselección de activos" data-dpst-open="{html_escape(title)}" '
+        f'style="animation-delay:{0.05 * i:.2f}s"><span class="ps-ic">{icon(ic, 18)}</span>'
+        f'<span class="ps-tx"><span class="ps-n">{names[i]}</span><span class="ps-s">{html_escape(text)}</span></span>'
+        f'<span class="ps-dot" aria-hidden="true"></span></button>'
+        for i, ((title, _mi, ic), (state, text)) in enumerate(zip(PRESELECTION_MODULES, states))
+    )
+    focus = ('<button type="button" class="ps-focus" data-ps-focus aria-pressed="false">'
+             + icon("target", 14) + '<span>Abrir un módulo a la vez</span></button>')
+    return (f'<div class="ps-head">{section_label_html("Estado de los módulos", "activity")}{focus}</div>'
+            f'<div class="ps-status">{cells}</div>')
+
+
 def render_preselection_page() -> None:
     """
     Preselección (v1): cada bloque es desplegable para no tener que bajar
     tanto; se abre solo lo que se esté mostrando.
     """
-    _page_title("Preselección de activos",
-                "Abre solo la sección que vas a mostrar. Los datos se conservan al cerrar y abrir.")
-    with st.expander("Datos del activo a probar", expanded=True):
-        render_asset_data()
-    result = st.session_state.get("asset_result")  # leído después de una posible descarga
-    ticker = f" · {result.ticker}" if result is not None and result.ok else ""
-    with st.expander(f"Análisis histórico{ticker}"):
-        if _need_asset():
-            render_historical_analysis()
-    with st.expander(f"Pronóstico{ticker}"):
-        if _need_asset():
-            render_forecast()
-    with st.expander("Comparación y preselección de activos"):
-        render_comparison()
-    with st.expander("Pronóstico por canasta de inversión (USD por activo)"):
-        render_portfolio_forecast()
+    st.markdown(page_header_html("Análisis de activos", "Preselección de activos",
+                                 "Abre solo la sección que vas a mostrar. Los datos se conservan al cerrar y abrir.",
+                                 "chart"), unsafe_allow_html=True)
+    st.markdown(_preselection_status_html(), unsafe_allow_html=True)
+    icons = {title: mi for title, mi, _ in PRESELECTION_MODULES}
+    with st.container(key="ps_modules"):
+        with st.expander("Datos del activo a probar", expanded=True, icon=icons["Datos del activo a probar"]):
+            render_asset_data()
+        result = st.session_state.get("asset_result")  # leído después de una posible descarga
+        ticker = f" · {result.ticker}" if result is not None and result.ok else ""
+        with st.expander(f"Análisis histórico{ticker}", icon=icons["Análisis histórico"]):
+            if _need_asset():
+                render_historical_analysis()
+        with st.expander(f"Pronóstico{ticker}", icon=icons["Pronóstico"]):
+            if _need_asset():
+                render_forecast()
+        with st.expander("Comparación y preselección de activos", icon=icons["Comparación y preselección de activos"]):
+            render_comparison()
+        with st.expander("Pronóstico por canasta de inversión (USD por activo)",
+                         icon=icons["Pronóstico por canasta de inversión (USD por activo)"]):
+            render_portfolio_forecast()
 
 
 if __name__ == "__main__":

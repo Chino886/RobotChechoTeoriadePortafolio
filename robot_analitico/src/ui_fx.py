@@ -576,6 +576,65 @@ html { font-optical-sizing: auto; }
 }
 @media (prefers-reduced-transparency: reduce) { .tk-opts-panel { backdrop-filter: none; background: #121A2B; } }
 
+/* ===== Preselección: panel de estado ===== */
+.ps-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ps-head .dpst-label { margin-bottom: 0.7rem; }
+.ps-focus { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 600;
+    color: #AEB9CE; background: rgba(18, 26, 43, 0.8); border: 1px solid rgba(148, 170, 210, 0.2); transition: color .2s, border-color .2s, background .2s, transform .1s ease-out; }
+.ps-focus:hover { color: #E8EDF6; border-color: rgba(52, 201, 160, 0.5); }
+.ps-focus:active { transform: scale(.96); }
+.ps-focus[aria-pressed="true"] { color: #0A0F1C; background: linear-gradient(180deg, #6FE3C1, #22A883); border-color: transparent; }
+.ps-status { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 1.1rem; }
+.ps-mod { position: relative; display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer; font: inherit; padding: 0.8rem 0.9rem; min-width: 0;
+    border-radius: 14px; border: 1px solid rgba(148, 170, 210, 0.14); background: rgba(18, 26, 43, 0.75); color: #E8EDF6;
+    transition: border-color .25s, transform .35s cubic-bezier(.2,.8,.2,1), background .25s; animation: dpst-rise .6s cubic-bezier(.2,.8,.2,1) both; }
+.ps-mod:hover { transform: translateY(-2px); border-color: rgba(52, 201, 160, 0.45); }
+.ps-mod:active { transform: scale(.97); }
+.ps-ic { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: #8C99B3; background: rgba(148, 170, 210, 0.08); border: 1px solid rgba(148, 170, 210, 0.16); }
+.ps-tx { display: flex; flex-direction: column; min-width: 0; }
+.ps-n { font-weight: 600; font-size: 0.88rem; }
+.ps-s { font-size: 0.74rem; color: #8C99B3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ps-dot { position: absolute; top: 9px; right: 10px; width: 7px; height: 7px; border-radius: 50%; background: rgba(148, 170, 210, 0.35); }
+.ps-mod.ok .ps-ic { color: #6FE3C1; background: rgba(52, 201, 160, 0.12); border-color: rgba(52, 201, 160, 0.32); }
+.ps-mod.ok .ps-dot { background: #34C9A0; box-shadow: 0 0 8px #34C9A0; }
+.ps-mod.ok .ps-s { color: #BDEFDF; }
+.ps-mod.ready .ps-ic { color: #9CC4FF; background: rgba(106, 168, 255, 0.12); border-color: rgba(106, 168, 255, 0.32); }
+.ps-mod.ready .ps-dot { background: #6AA8FF; box-shadow: 0 0 8px #6AA8FF; }
+.ps-mod.wait .ps-dot { background: #F5B84B; }
+
+/* ===== Preselección: módulos desplegables ===== */
+.st-key-ps_modules > div > [data-testid="stElementContainer"] [data-testid="stExpander"] > details,
+.st-key-ps_modules [data-testid="stExpander"] > details { border-radius: 18px !important; }
+.st-key-ps_modules > [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"] > [data-testid="stExpander"] > details > summary,
+.st-key-ps_modules > [data-testid="stVerticalBlock"] > [data-testid="stExpander"] > details > summary { padding: 1rem 1.2rem !important; }
+.st-key-ps_modules summary [data-testid="stExpanderIcon"], .st-key-ps_modules summary [data-testid="stIconMaterial"] { color: #34C9A0; }
+.st-key-ps_modules details > summary { position: relative; }
+.st-key-ps_modules details[open] > summary::after {
+    content: "Abierto"; position: absolute; right: 3.2rem; top: 50%; transform: translateY(-50%);
+    font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.64rem; letter-spacing: .12em; text-transform: uppercase;
+    color: #BDEFDF; padding: 2px 8px; border-radius: 999px; background: rgba(52, 201, 160, 0.12); border: 1px solid rgba(52, 201, 160, 0.32);
+}
+.st-key-ps_modules details details[open] > summary::after { content: none; }
+@keyframes dpst-acc { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.st-key-ps_modules details[open] > [data-testid="stExpanderDetails"], .st-key-ps_modules details[open] > div { animation: dpst-acc .35s cubic-bezier(.2,.8,.2,1) both; }
+.st-key-ps_modules [data-testid="stExpanderDetails"] .dpst-label:first-child { margin-top: 0.2rem; }
+.st-key-ps_modules [data-testid="stPlotlyChart"] { animation: dpst-rise .6s cubic-bezier(.2,.8,.2,1) both; }
+.st-key-ps_modules [data-testid="stTabs"] [role="tablist"] { gap: 4px; }
+.st-key-ps_modules [data-testid="stTabs"] [role="tab"] { padding: 6px 12px; border-radius: 10px 10px 0 0; }
+.st-key-ps_modules [data-testid="stTabs"] [role="tab"][aria-selected="true"] { background: rgba(52, 201, 160, 0.08); }
+.st-key-ps_modules [data-testid="stMetric"] { border-left: 1px solid rgba(148, 170, 210, 0.14); }
+.st-key-ps_modules [data-testid="stMetricDelta"] svg { display: inline; }
+.st-key-ps_modules [data-baseweb="input"], .st-key-ps_modules [data-baseweb="select"] > div { min-height: 42px; }
+.st-key-ps_modules [data-testid="stDateInput"] input { font-family: 'Geist Mono', ui-monospace, monospace; letter-spacing: .02em; }
+.st-key-ps_modules [data-testid="stAlert"] { border-radius: 14px; }
+[data-testid="stSpinner"] { color: #6FE3C1; }
+[data-testid="stSpinner"] i { border-color: #34C9A0 rgba(52,201,160,.2) rgba(52,201,160,.2) !important; }
+@media (max-width: 1100px) { .ps-status { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 700px) {
+    .ps-status { grid-template-columns: minmax(0, 1fr); }
+    .st-key-ps_modules details[open] > summary::after { content: none; }
+}
+
 /* El componente invisible que carga los efectos no debe ocupar espacio. */
 [data-testid="stElementContainer"]:has(> iframe[title="st.iframe"][height="0"]),
 [data-testid="stElementContainer"]:has(iframe[height="0"]) { display: none; }
@@ -810,6 +869,29 @@ _FX_JS = r"""
       if (++tries < 15) setTimeout(pick, 60);
     })();
   });
+
+  /* ---------- Preselección: «Abrir un módulo a la vez» (apagado por defecto) ----------
+     Al abrir un módulo, cierra los demás módulos principales con su propio clic (el mismo que
+     haría el usuario); los desplegables internos de cada módulo no se tocan. */
+  let psFocus = false;
+  try { psFocus = P.localStorage.getItem('dpst_ps_focus') === '1'; } catch (err) {}
+  const syncFocusBtn = () => D.querySelectorAll('[data-ps-focus]').forEach(b => b.setAttribute('aria-pressed', psFocus ? 'true' : 'false'));
+  D.addEventListener('click', e => {
+    const b = e.target && e.target.closest ? e.target.closest('[data-ps-focus]') : null;
+    if (!b) return;
+    psFocus = !psFocus; syncFocusBtn();
+    try { P.localStorage.setItem('dpst_ps_focus', psFocus ? '1' : '0'); } catch (err) {}
+  });
+  const topModules = () => [...D.querySelectorAll('.st-key-ps_modules [data-testid="stExpander"] > details')]
+    .filter(d => !d.parentElement.parentElement.closest('[data-testid="stExpander"]'));
+  D.addEventListener('toggle', e => {
+    const det = e.target;
+    if (!psFocus || !det || det.tagName !== 'DETAILS' || !det.open) return;
+    const mods = topModules(); if (!mods.includes(det)) return;
+    mods.forEach(o => { if (o !== det && o.open) { const s = o.querySelector(':scope > summary'); if (s) s.click(); } });
+  }, true);
+  new P.MutationObserver(syncFocusBtn).observe(D.body, { childList: true, subtree: true });
+  syncFocusBtn();
 
   /* ---------- carrusel de noticias de Inicio ----------
      Pasa solo cada N segundos (se pausa con el mouse encima, con el foco dentro, con el botón
