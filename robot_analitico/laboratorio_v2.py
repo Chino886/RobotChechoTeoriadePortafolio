@@ -32,7 +32,7 @@ from src.capm import (
     wacc,
 )
 from src.backtest import ALL_STRATEGIES, ESTIMATORS, BacktestConfig, select_by_validation, walk_forward
-from src.charts import DARK_LAYOUT, ELECTRIC_BLUE, ACCENT_GOLD, STAR_WHITE
+from src.charts import DARK_LAYOUT, ELECTRIC_BLUE, ACCENT_GOLD, NEGATIVE, PLOTLY_CONFIG, POSITIVE, STAR_WHITE, polish
 from src.data import fetch_asset_data, resample_prices
 from src.data_quality import (
     FX_TICKER_COP_PER_USD,
@@ -346,7 +346,7 @@ def _render_live_quote():
             fig = go.Figure(go.Scatter(x=first.bars.index, y=first.bars.values, mode="lines", line=dict(color=ACCENT_GOLD),
                                        name=first.ticker))
             fig.update_layout(title=f"{first.ticker}: barras de 1 minuto (la última puede estar incompleta)", height=300, **LAYOUT)
-            st.plotly_chart(fig)
+            st.plotly_chart(polish(fig), config=PLOTLY_CONFIG)
             st.caption(f"Tipo de precio: {first.price_type}. Recibido: {first.received_at:%Y-%m-%d %H:%M:%S} UTC · "
                        f"zona de la bolsa: {first.timezone or 'N/D'}.")
         log = st.session_state.get("lab_quote_log", [])
@@ -393,8 +393,8 @@ def _tab_risk(lab: LabData):
             else:
                 st.dataframe(issues)
     c1, c2 = st.columns(2)
-    c1.plotly_chart(_heatmap(lab.sigma * m, "Covarianza anualizada (decimal²)", fmt=".4f"))
-    c2.plotly_chart(_heatmap(corr, "Correlación (sin unidad)", zmid=0))
+    c1.plotly_chart(polish(_heatmap(lab.sigma * m, "Covarianza anualizada (decimal²)", fmt=".4f")), config=PLOTLY_CONFIG)
+    c2.plotly_chart(polish(_heatmap(corr, "Correlación (sin unidad)", zmid=0)), config=PLOTLY_CONFIG)
     _explain("¿Cómo leo estas tablas de colores?", _cov_corr_help(lab.sigma * m, corr))
 
     st.markdown("**Prueba una cartera** (los pesos los eliges tú; deben sumar 1):")
@@ -413,9 +413,9 @@ def _tab_risk(lab: LabData):
         st.info("La cartera no tiene riesgo estimado: las contribuciones no se calculan (no se divide por cero).")
     else:
         fig = go.Figure(go.Bar(x=list(rc.percent.index), y=rc.percent.to_numpy(),
-                               marker_color=[ACCENT_GOLD if v >= 0 else ELECTRIC_BLUE for v in rc.percent]))
+                               marker_color=[POSITIVE if v >= 0 else NEGATIVE for v in rc.percent]))
         fig.update_layout(title="Contribución de cada activo al riesgo (% de la volatilidad)", yaxis_tickformat=".0%", height=320, **LAYOUT)
-        st.plotly_chart(fig)
+        st.plotly_chart(polish(fig), config=PLOTLY_CONFIG)
 
     _explain("¿Qué significa cada número?", AYUDA["indicadores"])
     conc = concentration(w)
@@ -448,7 +448,7 @@ def _tab_risk(lab: LabData):
                                      opacity=1 if is_p else 0.45))
         fig.update_layout(title=f"Volatilidad móvil anualizada ({window} obs.) — cartera vs. activos", yaxis_tickformat=".0%",
                           height=360, **LAYOUT)
-        st.plotly_chart(fig)
+        st.plotly_chart(polish(fig), config=PLOTLY_CONFIG)
         c1, c2 = st.columns(2)
         assets = list(lab.returns.columns)
         x = c1.selectbox("Correlación móvil entre", assets, index=0, key="lab_rc_a")
@@ -461,7 +461,7 @@ def _tab_risk(lab: LabData):
         fig.update_layout(title="Correlación móvil y caída desde el máximo (drawdown) de la cartera", height=340,
                           yaxis=dict(title="correlación", range=[-1, 1]),
                           yaxis2=dict(title="drawdown", overlaying="y", side="right", tickformat=".0%"), **LAYOUT)
-        st.plotly_chart(fig)
+        st.plotly_chart(polish(fig), config=PLOTLY_CONFIG)
         st.caption("Pesos constantes: equivale a rebalancear a esos pesos cada periodo, sin costos (mantener cantidades es otra contabilidad).")
 
     _explain("¿Qué es el riesgo de una cartera?", AYUDA["riesgo_cartera"])
@@ -486,10 +486,10 @@ def _tab_stress(lab: LabData, w, bounds, groups):
                                  help="La pérdida que el mandato no tolera en un periodo (0,10 = 10 %). Es decisión del equipo.")
 
     ind = individual_shocks(w, shock).sort_values(ascending=False)
-    fig = go.Figure(go.Bar(x=list(ind.index), y=ind.to_numpy(), marker_color=ELECTRIC_BLUE))
+    fig = go.Figure(go.Bar(x=list(ind.index), y=ind.to_numpy(), marker_color=[NEGATIVE if v > 0 else POSITIVE for v in ind]))  # es una pérdida: positiva = rojo
     fig.update_layout(title=f"Pérdida de la cartera si cada activo, por separado, cae {abs(shock):.0%}", yaxis_tickformat=".1%",
                       height=300, **LAYOUT)
-    st.plotly_chart(fig)
+    st.plotly_chart(polish(fig), config=PLOTLY_CONFIG)
 
     base_vol = portfolio_stats(w, lab.mu, lab.sigma).volatility
     rows = []
@@ -540,7 +540,7 @@ def _tab_stress(lab: LabData, w, bounds, groups):
             fig = go.Figure([go.Bar(name=a, x=list(wdf.index), y=wdf[a]) for a in wdf.columns])
             fig.update_layout(barmode="stack", title="Pesos de la mínima varianza según el estimador de Σ", yaxis_tickformat=".0%",
                               height=340, **LAYOUT)
-            st.plotly_chart(fig)
+            st.plotly_chart(polish(fig), config=PLOTLY_CONFIG)
         st.caption("La estabilidad de cada estimador en el tiempo (rotación) se compara en la pestaña «Backtest». "
                    "λ debe elegirse sin mirar el tramo de prueba final.")
 
@@ -604,7 +604,7 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None
                                  marker=dict(size=7, color="rgba(230,230,230,0.7)")))
     fig.update_layout(title="Frontera de mínima varianza calculada por optimización", xaxis_title="Volatilidad anualizada",
                       yaxis_title="Rendimiento esperado anualizado", xaxis_tickformat=".0%", yaxis_tickformat=".0%", height=520, **LAYOUT)
-    st.plotly_chart(fig)
+    st.plotly_chart(polish(fig), config=PLOTLY_CONFIG)
     if frontier.empty:
         st.warning(f"Frontera no dibujada: {frontier.attrs.get('estado', 'sin datos')}")
 
@@ -773,7 +773,7 @@ def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds, group
             fig.add_trace(go.Bar(name=asset, x=list(wdf.index), y=wdf[asset]))
         fig.update_layout(barmode="stack", title=f"Pesos del óptimo personal (γ = {gamma:g}) según la expectativa usada",
                           yaxis_tickformat=".0%", height=380, **LAYOUT)
-        st.plotly_chart(fig)
+        st.plotly_chart(polish(fig), config=PLOTLY_CONFIG)
         st.caption("La comparación principal cambia solo μ (misma Σ y mismas cotas). La variante con Σ predictiva = Σ + M se "
                    "muestra aparte porque mezcla incertidumbre de la media con riesgo.")
 
@@ -988,7 +988,7 @@ def _tab_backtest(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None)
     fig.add_vline(x=res.test_start, line=dict(color=STAR_WHITE, dash="dash"))
     fig.add_annotation(x=res.test_start, y=1, yref="paper", text="inicio prueba final", showarrow=False, font=dict(color=STAR_WHITE))
     fig.update_layout(title="Valor neto de costos (empieza en 1)", height=420, **LAYOUT)
-    st.plotly_chart(fig)
+    st.plotly_chart(polish(fig), config=PLOTLY_CONFIG)
     pct_cols = ["rendimiento anual (CAGR)", "volatilidad anual", "máximo drawdown", "rendimiento acumulado",
                 "rotación media por decisión", "costos totales", "cambio medio de pesos objetivo"]
     st.dataframe(res.metrics.style.format({c: "{:.2%}" for c in pct_cols} | {"Sharpe anual": "{:.2f}"}, na_rep="—"))
@@ -1097,7 +1097,7 @@ def _capm_and_performance(lab: LabData, results, betas: pd.Series, mret: pd.Seri
                              text=capm_df.loc[is_port, "activo o cartera"], hovertemplate="%{text}<extra></extra>"))
     fig.update_layout(title=f"SML: rf = {rf_ea:.2%}, ERP = {erp:.2%}, proxy de mercado = {bench_name}",
                       xaxis_title="Beta", yaxis_title="Rendimiento anual", yaxis_tickformat=".0%", height=380, **LAYOUT)
-    st.plotly_chart(fig)
+    st.plotly_chart(polish(fig), config=PLOTLY_CONFIG)
     st.caption(f"Declarado: proxy de mercado {bench_name}, rf = {rf_ea:.2%} EA (supuestos del laboratorio), ventana "
                f"{lab.returns.index[0].date()} a {lab.returns.index[-1].date()}, frecuencia {lab.frequency}. Un punto sobre la SML "
                "rindió en la muestra más de lo que su beta exige; no implica que lo siga haciendo.")
@@ -1335,7 +1335,7 @@ def _tab_capm(lab: LabData, results=None, rf_ea: float = 0.0):
                                  textposition="top left", marker=dict(size=11, color=STAR_WHITE), showlegend=False))
     fig.update_layout(title="SML del caso (USD, sin prima país)", xaxis_title="Beta", yaxis_title="Rendimiento requerido",
                       yaxis_tickformat=".0%", height=360, **LAYOUT)
-    st.plotly_chart(fig)
+    st.plotly_chart(polish(fig), config=PLOTLY_CONFIG)
 
     _explain("¿Qué significan beta, CAPM y las demás palabras?", AYUDA["capm_valoracion"])
 
@@ -1429,7 +1429,7 @@ def _tab_factsheet(lab: LabData, results, rf_ea, gamma, bounds, groups, sectors,
         fig = go.Figure(go.Scatter(x=fs.value_path.index, y=fs.value_path, line=dict(color=ACCENT_GOLD), name="valor"))
         fig.update_layout(title=f"Evolución de 100.000 {lab.currency or ''} invertidos (pesos constantes, sin costos)",
                           height=320, **LAYOUT)
-        st.plotly_chart(fig)
+        st.plotly_chart(polish(fig), config=PLOTLY_CONFIG)
     c1, c2, c3 = st.columns(3)
     for col, series, title in ((c1, fs.composition_asset, "4. Composición por activo"),
                                (c2, fs.composition_currency, "Por moneda de origen"),

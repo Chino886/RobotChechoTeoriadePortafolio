@@ -212,3 +212,106 @@ def risk_return_map(summaries, non_dominated, starred_ticker: "str | None" = Non
         **DARK_LAYOUT,
     )
     return fig
+
+
+# ---------------------------------------------------------------------------
+# Capa común de interacción y estilo para TODAS las gráficas (solo presentación).
+# No toca x, y, z ni ninguna serie: solo tooltips, ejes, leyenda, selector de periodo,
+# colores de signo en barras sin color propio, tamaño y márgenes.
+# ---------------------------------------------------------------------------
+POSITIVE = "#16A34A"  # verde: resultados positivos
+NEGATIVE = "#E5484D"  # rojo: resultados negativos
+
+_RANGE_BUTTONS = [dict(count=1, label="1M", step="month", stepmode="backward"),
+                  dict(count=6, label="6M", step="month", stepmode="backward"),
+                  dict(count=1, label="1A", step="year", stepmode="backward"),
+                  dict(count=1, label="YTD", step="year", stepmode="todate"),
+                  dict(step="all", label="Todo")]
+
+
+def _is_dates(values) -> bool:
+    if values is None or len(values) < 2:
+        return False
+    v = values[0]
+    if str(getattr(v, "dtype", "")).startswith("datetime64") or type(v).__name__ == "datetime64":
+        return True
+    return isinstance(v, (pd.Timestamp,)) or hasattr(v, "year") or (
+        isinstance(v, str) and len(v) >= 10 and v[4] == "-" and v[7] == "-")
+
+
+def _fmt_from_axis(axis) -> str:
+    tf = getattr(axis, "tickformat", None) or ""
+    if "%" in tf:
+        return ".2%"
+    return ",.4~f"
+
+
+def polish(fig: go.Figure) -> go.Figure:
+    """Aplica la identidad visual e interacción DPST a una figura ya construida (mismos datos)."""
+    lay = fig.layout
+    x_fmt = _fmt_from_axis(lay.xaxis)
+    y_fmts = {"y": _fmt_from_axis(lay.yaxis), "y2": _fmt_from_axis(lay["yaxis2"] if "yaxis2" in lay else None)}
+    time_axis = False
+    span_days = 0
+    unified = "unified" in str(lay.hovermode or "")
+    n_named = 0
+    for tr in fig.data:
+        kind = tr.type
+        if getattr(tr, "showlegend", None) is not False and getattr(tr, "name", None):
+            n_named += 1
+        if kind in ("scatter", "scattergl", "bar"):
+            horiz = kind == "bar" and getattr(tr, "orientation", None) == "h"
+            xs = tr.y if horiz else tr.x
+            dates = _is_dates(list(xs) if xs is not None else None)
+            y_fmt = y_fmts.get(getattr(tr, "yaxis", None) or "y", y_fmts["y"])
+            if dates and not horiz:
+                time_axis = True
+                try:
+                    d = pd.to_datetime(pd.Series(list(xs)))
+                    span_days = max(span_days, (d.max() - d.min()).days)
+                except (ValueError, TypeError):
+                    pass
+            if tr.hovertemplate is None and tr.hoverinfo != "skip":
+                head = ("<b>%{text}</b><br>" if tr.text is not None and not tr.name else
+                        "<b>%{fullData.name}</b><br>" if tr.name else "")
+                if horiz:
+                    tr.hovertemplate = head + "%{y}: %{x:" + x_fmt + "}<extra></extra>"
+                else:
+                    xpart = "" if (unified and dates) else "%{x|%Y-%m-%d}" if dates else ("%{x:" + x_fmt + "}" if tr.x is not None and len(tr.x) and
+                                                          isinstance(tr.x[0], (int, float)) else "%{x}") + ("" if (unified and dates) else " · ")
+                    tr.hovertemplate = head + xpart + "%{y:" + y_fmt + "}<extra></extra>"
+            if kind == "bar" and tr.marker.color is None and getattr(fig.layout, "barmode", None) not in ("stack", "relative"):
+                vals = tr.x if horiz else tr.y
+                try:
+                    nums = [float(v) for v in vals]
+                except (TypeError, ValueError):
+                    nums = []
+                if nums and min(nums) < 0 < max(nums) and len(fig.data) == 1:
+                    tr.marker.color = [POSITIVE if v >= 0 else NEGATIVE for v in nums]
+            if kind in ("scatter", "scattergl") and tr.mode and "markers" in tr.mode and tr.marker.line.width is None:
+                tr.marker.line.width = 1
+                tr.marker.line.color = "rgba(255,255,255,0.65)"
+        elif kind == "heatmap" and tr.hovertemplate is None:
+            tr.hovertemplate = "<b>%{y} · %{x}</b><br>%{z:,.4f}<extra></extra>"
+    upd = dict(dragmode="zoom", hoverlabel=dict(namelength=-1),
+               modebar=dict(bgcolor="rgba(0,0,0,0)", color="rgba(140,153,179,0.85)", activecolor="#2563EB"),
+               legend=dict(itemclick="toggle", itemdoubleclick="toggleothers"))
+    if lay.legend.orientation is None and n_named > 1:
+        upd["legend"].update(orientation="h", yanchor="top", y=-0.16, x=0)
+    if lay.height is None:
+        upd["height"] = 420
+    fig.update_layout(**upd)
+    fig.update_xaxes(automargin=True, title_standoff=10)
+    fig.update_yaxes(automargin=True, title_standoff=10)
+    if lay.title.text and (lay.title.font.size is None or lay.title.font.size > 18):
+        fig.update_layout(title_font_size=18, title_x=0, title_xanchor="left")
+    if time_axis:
+        fig.update_xaxes(hoverformat="%Y-%m-%d")  # fecha exacta en el encabezado del tooltip
+    if time_axis and span_days > 45 and lay.xaxis.rangeselector.buttons in (None, ()):
+        fig.update_xaxes(rangeselector=dict(
+            buttons=_RANGE_BUTTONS, x=0, xanchor="left", y=1.02, yanchor="bottom",
+            bgcolor="rgba(18,26,43,0.9)", activecolor="rgba(52,201,160,0.35)", bordercolor="rgba(148,170,210,0.2)",
+            borderwidth=1, font=dict(color="#E8EDF6", size=11)))
+        if (lay.margin.t or 0) < 70:
+            fig.update_layout(margin_t=max(lay.margin.t or 0, 70) + (24 if lay.title.text else 0))
+    return fig
