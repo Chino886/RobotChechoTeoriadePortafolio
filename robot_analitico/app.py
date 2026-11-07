@@ -27,7 +27,7 @@ from src.analytics import (
 from src.auth import is_auth_configured, require_login
 import plotly.graph_objects as go
 
-from src.charts import DARK_LAYOUT, PLOTLY_CONFIG, forecast_chart, price_chart, return_chart, risk_return_map
+from src.charts import DARK_LAYOUT, PLOTLY_CONFIG, forecast_chart, polish, price_chart, return_chart, risk_return_map
 from src.comparison import (
     MIN_COMPARISON_ASSETS,
     build_comparison,
@@ -595,9 +595,8 @@ def render_historical_analysis() -> None:
 
     with tab_price:
         st.plotly_chart(
-            price_chart(prices, result.ticker, result.currency, frequency, result.source),
-            use_container_width=True,
-        )
+            polish(price_chart(prices, result.ticker, result.currency, frequency, result.source)),
+            use_container_width=True, config=PLOTLY_CONFIG)
         st.caption(
             f"Último precio: {prices.iloc[-1]:.4f} ({prices.index[-1].date()}) · "
             f"Fuente: {result.source} · Moneda: {result.currency or 'N/D'}"
@@ -606,7 +605,7 @@ def render_historical_analysis() -> None:
             st.dataframe(prices.tail(30).rename("precio_ajustado"))
 
     with tab_returns:
-        st.plotly_chart(return_chart(returns, result.ticker, frequency), use_container_width=True)
+        st.plotly_chart(polish(return_chart(returns, result.ticker, frequency)), use_container_width=True, config=PLOTLY_CONFIG)
         st.caption(f"Último log-rendimiento: {returns.iloc[-1]:.6f} ({returns.index[-1].date()})")
         st.info(
             "**¿Qué es un rendimiento logarítmico?** Es la variación del precio "
@@ -799,7 +798,7 @@ def render_forecast() -> None:
     )
 
     with tab_traj:
-        st.plotly_chart(forecast_chart(prices, steps, result.ticker, frequency), use_container_width=True)
+        st.plotly_chart(polish(forecast_chart(prices, steps, result.ticker, frequency)), use_container_width=True, config=PLOTLY_CONFIG)
         st.dataframe(
             pd.DataFrame(
                 {
@@ -1099,7 +1098,7 @@ def render_comparison() -> None:
                                    help="Al inicio se muestran 8 para que se lea bien; agrega o quita los que quieras. "
                                         "También puedes tocar un nombre en la leyenda para ocultar o mostrar su línea.")
         if shown:
-            st.plotly_chart(evolution_figure(result, shown, period, mode), use_container_width=True,
+            st.plotly_chart(polish(evolution_figure(result, shown, period, mode)), use_container_width=True,
                             config=PLOTLY_CONFIG)
             st.caption(
                 "Precios procesados de la ventana común (los mismos que se exportan), en "
@@ -1107,7 +1106,7 @@ def render_comparison() -> None:
                 "escala para comparar; no modifica las métricas de la tabla. Doble clic en el gráfico restaura la vista.")
         else:
             st.info("Elige al menos un activo para ver su evolución.")
-        st.plotly_chart(mean_bar_figure(result.summaries, non_dominated), use_container_width=True, config=PLOTLY_CONFIG)
+        st.plotly_chart(polish(mean_bar_figure(result.summaries, non_dominated)), use_container_width=True, config=PLOTLY_CONFIG)
         st.caption("Media histórica logarítmica anualizada de la tabla comparativa. Azul intenso = activo no dominado.")
 
     with tab_risk:
@@ -1116,11 +1115,11 @@ def render_comparison() -> None:
                    "Laboratorio de portafolios.")
         figs = risk_bar_figures(result.summaries, non_dominated)
         r1, r2 = st.columns(2)
-        r1.plotly_chart(figs[0], use_container_width=True, config=PLOTLY_CONFIG)
-        r2.plotly_chart(figs[1], use_container_width=True, config=PLOTLY_CONFIG)
+        r1.plotly_chart(polish(figs[0]), use_container_width=True, config=PLOTLY_CONFIG)
+        r2.plotly_chart(polish(figs[1]), use_container_width=True, config=PLOTLY_CONFIG)
         r3, r4 = st.columns(2)
-        r3.plotly_chart(figs[2], use_container_width=True, config=PLOTLY_CONFIG)
-        r4.plotly_chart(quantile_figure(result.summaries, non_dominated), use_container_width=True, config=PLOTLY_CONFIG)
+        r3.plotly_chart(polish(figs[2]), use_container_width=True, config=PLOTLY_CONFIG)
+        r4.plotly_chart(polish(quantile_figure(result.summaries, non_dominated)), use_container_width=True, config=PLOTLY_CONFIG)
 
     with tab_map:
         st.markdown("**Marca tu elección final**")
@@ -1131,8 +1130,7 @@ def render_comparison() -> None:
         )
         starred_value = None if starred == "(Ninguno)" else starred
         st.plotly_chart(
-            risk_return_map(result.summaries, non_dominated, starred_value), use_container_width=True
-        )
+            polish(risk_return_map(result.summaries, non_dominated, starred_value)), use_container_width=True, config=PLOTLY_CONFIG)
         st.caption(
             "Rombos resaltados = activos NO dominados (ningún otro activo del lote ofrece a la "
             "vez media igual o mayor y volatilidad igual o menor). Esto no es una frontera "
@@ -1451,7 +1449,7 @@ def _render_rate_series(fred_api_key: str, info: dict, label: str, rates_start, 
             series_by_label[other["label"]] = s
 
     st.markdown(section_label_html("Evolución de la tasa", "chart"), unsafe_allow_html=True)
-    st.plotly_chart(_rates_chart(series_by_label), use_container_width=True)
+    st.plotly_chart(polish(_rates_chart(series_by_label)), use_container_width=True, config=PLOTLY_CONFIG)
     st.caption(f"Fuente: {info['source']} vía FRED, {info['detail']}; serie {info['frequency']} en % anual. "
                f"Código **{info['id']}** — {info['title']}.")
     if _is_stale(info["observation_end"]):
@@ -1535,7 +1533,7 @@ def _render_rates_free_search(fred_api_key: str) -> None:
     if series.empty:
         st.warning("No se encontraron observaciones válidas para ese rango de fechas.")
         return
-    st.plotly_chart(_rates_chart({series_id: series}), use_container_width=True)
+    st.plotly_chart(polish(_rates_chart({series_id: series})), use_container_width=True, config=PLOTLY_CONFIG)
     st.metric("Última tasa disponible", f"{series.iloc[-1]:.2f}%", help=f"Fecha: {series.index[-1].date()}")
 
 
@@ -1743,9 +1741,8 @@ def render_portfolio_forecast() -> None:
                         steps = forecast_path(model, p0, horizon)
                         fig = forecast_chart(prices, steps, ticker, pf_frequency)
                         st.plotly_chart(
-                            fig, use_container_width=True,
-                            key=f"pf_chart_{entry_idx}_{model_label}",
-                        )
+                            polish(fig), use_container_width=True,
+                            key=f"pf_chart_{entry_idx}_{model_label}", config=PLOTLY_CONFIG)
 
                 st.divider()
 

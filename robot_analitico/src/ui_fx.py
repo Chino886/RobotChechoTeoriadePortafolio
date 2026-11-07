@@ -90,6 +90,11 @@ html:not([data-dpst-theme="dark"]) .js-plotly-plot [style*="fill: rgb(245, 184, 
 html:not([data-dpst-theme="dark"]) .js-plotly-plot [style*="stroke: rgb(245, 247, 251)"] { stroke: var(--dp-ink) !important; }
 html:not([data-dpst-theme="dark"]) .js-plotly-plot [style*="fill: rgb(245, 247, 251)"] { fill: var(--dp-ink) !important; }
 html:not([data-dpst-theme="dark"]) .js-plotly-plot [style*="fill: rgb(255, 255, 255)"]:not(.bg) { fill: var(--dp-ink) !important; }
+html:not([data-dpst-theme="dark"]) .js-plotly-plot .scatterlayer [style*="fill: rgb(230, 230, 230)"] { fill: #64748B !important; }
+/* El contorno de la línea guía de Plotly es blanco (fondo transparente): se oculta para que no se vea grueso en oscuro. */
+.js-plotly-plot .spikeline[stroke="rgb(255, 255, 255)"] { stroke-opacity: 0 !important; }
+html:not([data-dpst-theme="dark"]) .js-plotly-plot .rangeselector .selector-rect[style*="fill: rgb(18, 26, 43)"] { fill: #FFFFFF !important; stroke: #D7DFEA !important; }
+html:not([data-dpst-theme="dark"]) .js-plotly-plot .rangeselector .selector-rect[style*="fill: rgb(52, 201, 160)"] { fill: rgba(37, 99, 235, 0.16) !important; }
 html:not([data-dpst-theme="dark"]) .js-plotly-plot .hoverlayer [style*="fill: rgb(18, 26, 43)"],
 html:not([data-dpst-theme="dark"]) .js-plotly-plot .rangeselector [style*="fill: rgba(18, 26, 43"] { fill: #FFFFFF !important; }
 html:not([data-dpst-theme="dark"]) .js-plotly-plot .rangeselector [style*="fill: rgba(52, 201, 160"] { fill: rgba(37, 99, 235, 0.18) !important; }
