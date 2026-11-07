@@ -218,23 +218,23 @@ LAB_NAV_CSS = """
 }
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"] {
     height: auto; min-height: 3.4rem; padding: 0.75rem 0.9rem; justify-content: center; text-align: center;
-    border: 1px solid rgba(52, 201, 160, 0.55); border-radius: 12px;
-    background: linear-gradient(180deg, rgba(52, 201, 160, 0.08), rgba(52, 201, 160, 0.02));
+    border: 1px solid rgba(var(--dp-accent-rgb), 0.55); border-radius: 12px;
+    background: linear-gradient(180deg, rgba(var(--dp-accent-rgb), 0.08), rgba(var(--dp-accent-rgb), 0.02));
     transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
 }
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"]:hover {
-    background: rgba(52, 201, 160, 0.16); transform: translateY(-1px);
-    box-shadow: 0 4px 14px rgba(52, 201, 160, 0.15);
+    background: rgba(var(--dp-accent-rgb), 0.16); transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(var(--dp-accent-rgb), 0.15);
 }
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"] p {
-    font-size: 0.98rem; font-weight: 700; color: #BDEFDF; white-space: normal;
+    font-size: 0.98rem; font-weight: 700; color: var(--dp-accent-ink); white-space: normal;
 }
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"][aria-selected="true"] {
-    background: linear-gradient(180deg, #6FE3C1, #22A883); border-color: #6FE3C1;
-    box-shadow: 0 4px 18px rgba(52, 201, 160, 0.25);
+    background: linear-gradient(180deg, var(--dp-accent-hi), var(--dp-accent-lo)); border-color: var(--dp-accent-hi);
+    box-shadow: 0 4px 18px rgba(var(--dp-accent-rgb), 0.25);
 }
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"][aria-selected="true"] p {
-    color: #0A0F1C;
+    color: var(--dp-on-accent);
 }
 .st-key-lab_nav > [data-testid="stTabs"] > div > [role="tablist"] .react-aria-SelectionIndicator { display: none; }
 @media (max-width: 760px) {
@@ -263,8 +263,9 @@ def _heatmap(matrix: pd.DataFrame, title: str, zmid=None, fmt=".2f"):
     z = matrix.to_numpy()
     fig = go.Figure(go.Heatmap(
         z=z, x=list(matrix.columns), y=list(matrix.index), zmid=zmid,
-        colorscale=([[0, "#6AA8FF"], [0.5, "#121A2B"], [1, "#34C9A0"]] if zmid is not None
-                    else [[0, "#121A2B"], [1, "#34C9A0"]]),
+        # El centro de la escala es casi transparente: deja ver el fondo, así se lee igual en tema claro y oscuro.
+        colorscale=([[0, "#6AA8FF"], [0.5, "rgba(148,170,210,0.10)"], [1, "#34C9A0"]] if zmid is not None
+                    else [[0, "rgba(52,201,160,0.08)"], [1, "#34C9A0"]]),
         hoverongaps=False,
     ))
     if len(matrix) <= 12:

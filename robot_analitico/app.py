@@ -202,31 +202,31 @@ NAV_CSS = """
    del contenedor dpst_nav; las pestañas internas de cada sección no cambian). */
 .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] {
     position: sticky; top: 3.6rem; z-index: 99;
-    background: rgba(10, 15, 28, 0.92); backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 14px;
+    background: rgba(var(--dp-bg-rgb), 0.92); backdrop-filter: blur(8px);
+    border: 1px solid rgba(var(--dp-hi-rgb), 0.07); border-radius: 14px;
     padding: 0.35rem 0.5rem; gap: 0.35rem; margin-bottom: 0.8rem;
     display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap;
 }
 /* Marca a la izquierda de la barra (logo + DPST), las secciones a la derecha. */
 .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"]::before {
     content: "__BRAND__"; margin-right: auto; padding: 0.3rem 0.6rem 0.3rem 2.6rem;
-    font-size: 1.3rem; font-weight: 800; letter-spacing: -0.01em; color: #E8EDF6;
+    font-size: 1.3rem; font-weight: 800; letter-spacing: -0.01em; color: var(--dp-ink);
     background: url("data:image/svg+xml;base64,__LOGO_B64__") no-repeat 0.4rem center / 1.9rem;
 }
 .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"] {
     padding: 0.55rem 1.1rem; border-radius: 10px; height: auto; transition: background 0.15s;
 }
 .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"]:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(var(--dp-hi-rgb), 0.04);
 }
 .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"] p {
-    font-size: 1.02rem; font-weight: 600; color: #AEB9CE;
+    font-size: 1.02rem; font-weight: 600; color: var(--dp-text-2);
 }
 .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"][aria-selected="true"] {
-    background: rgba(52, 201, 160, 0.12);
+    background: rgba(var(--dp-accent-rgb), 0.12);
 }
 .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"][aria-selected="true"] p {
-    color: #34C9A0;
+    color: var(--dp-accent);
 }
 .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"] > [data-testid="stTab"] .react-aria-SelectionIndicator {
     display: none;
@@ -238,22 +238,22 @@ NAV_CSS = """
 
 /* Botones principales verde esmeralda con texto oscuro (como "Empezar ahora"). */
 [data-testid="stBaseButton-primary"] {
-    background: linear-gradient(180deg, #6FE3C1, #22A883); color: #0A0F1C; border: none; font-weight: 700;
-    border-radius: 10px; box-shadow: 0 6px 20px rgba(52, 201, 160, 0.22);
+    background: linear-gradient(180deg, var(--dp-accent-hi), var(--dp-accent-lo)); color: var(--dp-on-accent); border: none; font-weight: 700;
+    border-radius: 10px; box-shadow: 0 6px 20px rgba(var(--dp-accent-rgb), 0.22);
     transition: transform 0.2s, box-shadow 0.2s, filter 0.2s;
 }
-[data-testid="stBaseButton-primary"] p { color: #0A0F1C; font-weight: 700; }
+[data-testid="stBaseButton-primary"] p { color: var(--dp-on-accent); font-weight: 700; }
 [data-testid="stBaseButton-primary"]:hover {
-    filter: brightness(1.06); color: #0A0F1C; transform: translateY(-1px);
-    box-shadow: 0 10px 28px rgba(52, 201, 160, 0.32);
+    filter: brightness(1.06); color: var(--dp-on-accent); transform: translateY(-1px);
+    box-shadow: 0 10px 28px rgba(var(--dp-accent-rgb), 0.32);
 }
 
 /* Encabezado de cada página: título serif editorial con etiqueta mono. */
 .dpst-page-title {
     margin: 0.4rem 0 0; font-family: 'Instrument Serif', Georgia, serif; font-weight: 400;
-    font-size: 2.6rem; line-height: 1.05; letter-spacing: -0.01em; color: #E8EDF6;
+    font-size: 2.6rem; line-height: 1.05; letter-spacing: -0.01em; color: var(--dp-ink);
 }
-.dpst-page-sub { color: #8C99B3; margin: 0.3rem 0 0.6rem; max-width: 70ch; }
+.dpst-page-sub { color: var(--dp-muted); margin: 0.3rem 0 0.6rem; max-width: 70ch; }
 
 /* Inicio: portada con gráfico animado */
 @keyframes dpst-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
@@ -264,18 +264,18 @@ NAV_CSS = """
 
 .dpst-hero {
     position: relative; overflow: hidden;
-    padding: 2.2rem 2.2rem 0; border-radius: 22px; border: 1px solid rgba(148, 170, 210, 0.14);
-    background: radial-gradient(900px 340px at 100% 0%, rgba(52, 201, 160, 0.14), transparent 60%),
-                radial-gradient(700px 300px at 0% 100%, rgba(106, 168, 255, 0.08), transparent 60%), #0E1526;
+    padding: 2.2rem 2.2rem 0; border-radius: 22px; border: 1px solid rgba(var(--dp-line-rgb), 0.14);
+    background: radial-gradient(900px 340px at 100% 0%, rgba(var(--dp-accent-rgb), 0.14), transparent 60%),
+                radial-gradient(700px 300px at 0% 100%, rgba(var(--dp-blue-rgb), 0.08), transparent 60%), var(--dp-surface-2);
 }
 .dpst-hero .copy { position: relative; z-index: 2; max-width: 52%; animation: dpst-rise 0.8s cubic-bezier(.2,.8,.2,1) both; }
 .dpst-hero h1 {
     margin: 0.7rem 0 0.2rem; font-family: 'Instrument Serif', Georgia, serif !important; font-weight: 400 !important;
     font-size: clamp(2.8rem, 6vw, 4.6rem) !important; line-height: 0.95; letter-spacing: -0.015em;
 }
-.dpst-hero .sub { font-size: 1.15rem; color: #C6D0E2; }
+.dpst-hero .sub { font-size: 1.15rem; color: var(--dp-text-1); }
 .dpst-hero .meta {
-    color: #8C99B3; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.78rem;
+    color: var(--dp-muted); font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.78rem;
     letter-spacing: 0.04em; margin-top: 0.8rem;
 }
 .dpst-hero .spark {
@@ -287,47 +287,47 @@ NAV_CSS = """
 .dpst-hero .spark .halo { animation: dpst-pulse 2.4s ease-in-out 2.4s infinite; }
 .dpst-tape {
     position: relative; z-index: 2; margin: 1.6rem -2.2rem 0; padding: 0.75rem 0; overflow: hidden;
-    border-top: 1px solid rgba(148, 170, 210, 0.14); background: rgba(10, 15, 28, 0.55);
+    border-top: 1px solid rgba(var(--dp-line-rgb), 0.14); background: rgba(var(--dp-bg-rgb), 0.55);
 }
 .dpst-tape .track {
     display: flex; gap: 2.4rem; width: max-content; animation: dpst-tape 40s linear infinite;
     font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.78rem; letter-spacing: 0.12em;
-    text-transform: uppercase; color: #8C99B3; white-space: nowrap;
+    text-transform: uppercase; color: var(--dp-muted); white-space: nowrap;
 }
-.dpst-tape .track span::before { content: "▲"; color: #34C9A0; margin-right: 0.6rem; font-size: 0.7em; }
+.dpst-tape .track span::before { content: "▲"; color: var(--dp-accent); margin-right: 0.6rem; font-size: 0.7em; }
 .dpst-pill {
     display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.8rem; border-radius: 999px;
     font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.72rem; font-weight: 500; letter-spacing: 0.12em;
-    color: #BDEFDF; background: rgba(52, 201, 160, 0.10); border: 1px solid rgba(52, 201, 160, 0.35);
+    color: var(--dp-accent-ink); background: rgba(var(--dp-accent-rgb), 0.10); border: 1px solid rgba(var(--dp-accent-rgb), 0.35);
 }
 .dpst-pill::before {
-    content: ""; width: 7px; height: 7px; border-radius: 50%; background: #34C9A0;
-    box-shadow: 0 0 10px #34C9A0; animation: dpst-pulse 2.4s infinite;
+    content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--dp-accent);
+    box-shadow: 0 0 10px var(--dp-accent); animation: dpst-pulse 2.4s infinite;
 }
 .dpst-notice {
-    margin-top: 0.6rem; padding: 1.1rem 1.3rem; border-radius: 14px; border: 1px solid rgba(245, 184, 75, 0.35);
-    background: rgba(245, 184, 75, 0.07); color: #E8EDF6;
+    margin-top: 0.6rem; padding: 1.1rem 1.3rem; border-radius: 14px; border: 1px solid rgba(var(--dp-amber-rgb), 0.35);
+    background: rgba(var(--dp-amber-rgb), 0.07); color: var(--dp-ink);
 }
-.dpst-notice b { color: #F5B84B; }
+.dpst-notice b { color: var(--dp-amber); }
 .dpst-card {
-    min-height: 200px; padding: 1.2rem 1.2rem; border-radius: 16px; border: 1px solid rgba(148, 170, 210, 0.14);
-    background: linear-gradient(180deg, rgba(18, 26, 43, 0.85), rgba(18, 26, 43, 0.55));
+    min-height: 200px; padding: 1.2rem 1.2rem; border-radius: 16px; border: 1px solid rgba(var(--dp-line-rgb), 0.14);
+    background: linear-gradient(180deg, rgba(var(--dp-surface-rgb), 0.85), rgba(var(--dp-surface-rgb), 0.55));
     backdrop-filter: blur(8px); position: relative; overflow: hidden;
     transition: border-color 0.3s, transform 0.4s cubic-bezier(.2,.8,.2,1), box-shadow 0.3s;
     animation: dpst-rise 0.7s cubic-bezier(.2,.8,.2,1) both;
 }
 .dpst-card::after {
     content: ""; position: absolute; inset: 0 0 auto 0; height: 2px;
-    background: linear-gradient(90deg, transparent, #34C9A0, transparent); opacity: 0; transition: opacity 0.3s;
+    background: linear-gradient(90deg, transparent, var(--dp-accent), transparent); opacity: 0; transition: opacity 0.3s;
 }
 .dpst-card:hover {
-    border-color: rgba(52, 201, 160, 0.45); transform: translateY(-4px);
-    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
+    border-color: rgba(var(--dp-accent-rgb), 0.45); transform: translateY(-4px);
+    box-shadow: 0 14px 34px rgba(var(--dp-shadow-rgb), calc(0.35 * var(--dp-shadow-k)));
 }
 .dpst-card:hover::after { opacity: 1; }
-.dpst-card .n { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.72rem; letter-spacing: 0.12em; color: #34C9A0; }
-.dpst-card .t { font-family: 'Instrument Serif', Georgia, serif; font-size: 1.55rem; line-height: 1.1; margin: 0.5rem 0 0.4rem; color: #E8EDF6; }
-.dpst-card .d { color: #94A1BA; font-size: 0.9rem; line-height: 1.5; }
+.dpst-card .n { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.72rem; letter-spacing: 0.12em; color: var(--dp-accent); }
+.dpst-card .t { font-family: 'Instrument Serif', Georgia, serif; font-size: 1.55rem; line-height: 1.1; margin: 0.5rem 0 0.4rem; color: var(--dp-ink); }
+.dpst-card .d { color: var(--dp-muted-2); font-size: 0.9rem; line-height: 1.5; }
 
 @media (max-width: 760px) {
     .dpst-hero { padding: 1.6rem 1.2rem 0; }
@@ -377,8 +377,8 @@ def render_header() -> None:
         /* Tokens de diseño (azul noche + esmeralda). Si cambian colores, cámbienlos aquí
            y en .streamlit/config.toml / src/charts.py. */
         :root {
-            --dpst-bg: #0A0F1C; --dpst-surface: #121A2B; --dpst-ink: #E8EDF6; --dpst-muted: #8C99B3;
-            --dpst-line: rgba(148, 170, 210, 0.14); --dpst-accent: #34C9A0; --dpst-accent-2: #6AA8FF;
+            --dpst-bg: var(--dp-bg); --dpst-surface: var(--dp-surface); --dpst-ink: var(--dp-ink); --dpst-muted: var(--dp-muted);
+            --dpst-line: rgba(var(--dp-line-rgb), 0.14); --dpst-accent: var(--dp-accent); --dpst-accent-2: var(--dp-blue);
             --dpst-display: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
             --dpst-body: 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             --dpst-mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
@@ -393,11 +393,11 @@ def render_header() -> None:
         /* Fondo con dos halos suaves (verde arriba a la derecha, azul a la izquierda). */
         [data-testid="stAppViewContainer"] {
             background:
-                radial-gradient(1000px 520px at 100% -10%, rgba(52, 201, 160, 0.09), transparent 60%),
-                radial-gradient(800px 600px at -10% 40%, rgba(106, 168, 255, 0.06), transparent 60%),
+                radial-gradient(1000px 520px at 100% -10%, rgba(var(--dp-accent-rgb), 0.09), transparent 60%),
+                radial-gradient(800px 600px at -10% 40%, rgba(var(--dp-blue-rgb), 0.06), transparent 60%),
                 var(--dpst-bg);
         }
-        [data-testid="stHeader"] { background: rgba(10, 15, 28, 0.6); backdrop-filter: blur(12px); }
+        [data-testid="stHeader"] { background: rgba(var(--dp-bg-rgb), 0.6); backdrop-filter: blur(12px); }
 
         h1, h2, h3 {
             font-family: var(--dpst-body) !important;
@@ -411,10 +411,10 @@ def render_header() -> None:
         }
         [data-testid="stMetric"] {
             padding: 0.9rem 1.1rem; border-radius: 14px; border: 1px solid var(--dpst-line);
-            background: rgba(18, 26, 43, 0.6); backdrop-filter: blur(8px);
+            background: rgba(var(--dp-surface-rgb), 0.6); backdrop-filter: blur(8px);
             transition: border-color 0.25s, transform 0.25s;
         }
-        [data-testid="stMetric"]:hover { border-color: rgba(52, 201, 160, 0.45); transform: translateY(-2px); }
+        [data-testid="stMetric"]:hover { border-color: rgba(var(--dp-accent-rgb), 0.45); transform: translateY(-2px); }
         [data-testid="stMetricLabel"] p {
             font-family: var(--dpst-mono) !important; text-transform: uppercase; letter-spacing: 0.1em;
             font-size: 0.72rem !important; color: var(--dpst-muted) !important;
@@ -423,7 +423,7 @@ def render_header() -> None:
         /* Gráficos y tablas dentro de una tarjeta de vidrio. */
         [data-testid="stPlotlyChart"] {
             padding: 0.4rem; border-radius: 16px; border: 1px solid var(--dpst-line);
-            background: rgba(18, 26, 43, 0.55);
+            background: rgba(var(--dp-surface-rgb), 0.55);
         }
         [data-testid="stDataFrame"], [data-testid="stTable"] {
             border-radius: 14px; border: 1px solid var(--dpst-line); overflow: hidden;
@@ -431,11 +431,11 @@ def render_header() -> None:
 
         /* Botones secundarios: píldora con borde que se enciende al pasar el mouse. */
         [data-testid="stBaseButton-secondary"] {
-            border-radius: 10px; border: 1px solid var(--dpst-line); background: rgba(232, 237, 246, 0.03);
+            border-radius: 10px; border: 1px solid var(--dpst-line); background: rgba(var(--dp-ink-rgb), 0.03);
             transition: border-color 0.2s, background 0.2s, transform 0.2s;
         }
         [data-testid="stBaseButton-secondary"]:hover {
-            border-color: var(--dpst-accent); color: var(--dpst-ink); background: rgba(52, 201, 160, 0.08);
+            border-color: var(--dpst-accent); color: var(--dpst-ink); background: rgba(var(--dp-accent-rgb), 0.08);
             transform: translateY(-1px);
         }
         [data-baseweb="input"], [data-baseweb="select"] > div, [data-baseweb="textarea"] { border-radius: 10px !important; }
@@ -453,7 +453,7 @@ def render_header() -> None:
         }
         [data-testid="stExpander"] details {
             border-radius: 12px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(var(--dp-hi-rgb), 0.08);
         }
         /* Los bloques <style> como este dejan un contenedor vacío que suma espacio. */
         [data-testid="stElementContainer"]:has(style) {
@@ -484,8 +484,8 @@ def render_sidebar_style() -> None:
         """
         <style>
         [data-testid="stSidebar"] {
-            background-color: #121A2B;
-            border-right: 1px solid rgba(255, 255, 255, 0.08);
+            background-color: var(--dp-surface);
+            border-right: 1px solid rgba(var(--dp-hi-rgb), 0.08);
         }
         [data-testid="stSidebar"] [data-baseweb="input"],
         [data-testid="stSidebar"] [data-baseweb="base-input"] {
@@ -495,12 +495,12 @@ def render_sidebar_style() -> None:
             padding: 0.9rem 1rem;
             margin-bottom: 0.5rem;
             border-radius: 12px 12px 0 0;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-bottom: 2px solid #34C9A0;
-            background: linear-gradient(135deg, rgba(52, 201, 160, 0.12), rgba(106, 168, 255, 0.06));
+            border: 1px solid rgba(var(--dp-hi-rgb), 0.08);
+            border-bottom: 2px solid var(--dp-accent);
+            background: linear-gradient(135deg, rgba(var(--dp-accent-rgb), 0.12), rgba(var(--dp-blue-rgb), 0.06));
             font-size: 1.25rem;
             font-weight: 700;
-            color: #E8EDF6;
+            color: var(--dp-ink);
             display: flex;
             align-items: center;
             gap: 10px;
@@ -1245,12 +1245,12 @@ def _rates_illustrative_curve_html() -> str:
         '<div class="rs-illus"><div class="ri-head"><span class="ri-t">¿Cómo se lee una curva de rendimiento?</span>'
         f'<span class="c-badge demo">{icon("info", 12)}Vista ilustrativa — no representa tasas reales ni datos de mercado</span></div>'
         '<svg viewBox="0 0 600 220" preserveAspectRatio="xMidYMid meet" aria-hidden="true">'
-        '<defs><linearGradient id="rsFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#6AA8FF" stop-opacity=".28"/>'
-        '<stop offset="100%" stop-color="#6AA8FF" stop-opacity="0"/></linearGradient></defs>'
+        '<defs><linearGradient id="rsFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" style="stop-color:var(--dp-blue)" stop-opacity=".28"/>'
+        '<stop offset="100%" style="stop-color:var(--dp-blue)" stop-opacity="0"/></linearGradient></defs>'
         '<g class="g"><line x1="40" x2="580" y1="40" y2="40"/><line x1="40" x2="580" y1="100" y2="100"/>'
         '<line x1="40" x2="580" y1="160" y2="160"/></g>'
         '<path class="a" d="M60,170 C160,150 240,120 330,95 S500,52 560,42 L560,190 L60,190 Z" fill="url(#rsFill)"/>'
-        '<path class="l" d="M60,170 C160,150 240,120 330,95 S500,52 560,42" fill="none" stroke="#6AA8FF" stroke-width="2.4"/>'
+        '<path class="l" d="M60,170 C160,150 240,120 330,95 S500,52 560,42" fill="none" style="stroke:var(--dp-blue)" stroke-width="2.4"/>'
         '<circle cx="60" cy="170" r="5"/><circle cx="200" cy="138" r="5"/><circle cx="330" cy="95" r="5"/><circle cx="560" cy="42" r="5"/>'
         '</svg><div class="ri-x"><span>Corto plazo</span><span>Mediano</span><span>10 años</span><span>Largo plazo</span></div>'
         '<div class="ri-note">Cada punto sería la tasa del mismo gobierno a un plazo distinto. Una curva que sube con el '
@@ -1932,7 +1932,7 @@ def _show_news(items: "list[dict]", hidden: int, empty_text: str) -> None:
         return
     for item in items:
         title = str(item.get("title", "")).replace("[", "(").replace("]", ")")
-        st.markdown(f"- [{title}]({item.get('link', '')})  \n  <span style='color:#8B93A7'>"
+        st.markdown(f"- [{title}]({item.get('link', '')})  \n  <span style='color:var(--dp-muted)'>"
                     f"{item.get('publisher', 'N/D')} · {_format_news_date(item.get('published'))}</span>",
                     unsafe_allow_html=True)
     if hidden:
@@ -2263,13 +2263,13 @@ def _hero_spark_svg() -> str:
     return (
         '<svg class="spark" viewBox="0 0 610 200" preserveAspectRatio="none" aria-hidden="true">'
         '<defs><linearGradient id="dpstSparkFill" x1="0" y1="0" x2="0" y2="1">'
-        '<stop offset="0%" stop-color="#34C9A0" stop-opacity="0.28"/>'
-        '<stop offset="100%" stop-color="#34C9A0" stop-opacity="0"/></linearGradient></defs>'
+        '<stop offset="0%" style="stop-color:var(--dp-accent)" stop-opacity="0.28"/>'
+        '<stop offset="100%" style="stop-color:var(--dp-accent)" stop-opacity="0"/></linearGradient></defs>'
         f'<path class="area" d="{_HERO_SPARK} L600,200 L0,200 Z" fill="url(#dpstSparkFill)"/>'
-        f'<path class="line" d="{_HERO_SPARK}" fill="none" stroke="#34C9A0" stroke-width="2.2" '
+        f'<path class="line" d="{_HERO_SPARK}" fill="none" style="stroke:var(--dp-accent)" stroke-width="2.2" '
         'stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
-        '<circle class="halo" cx="600" cy="41.1" r="9" fill="#34C9A0" fill-opacity="0.25"/>'
-        '<circle class="dot" cx="600" cy="41.1" r="4" fill="#BDEFDF"/>'
+        '<circle class="halo" cx="600" cy="41.1" r="9" style="fill:var(--dp-accent)" fill-opacity="0.25"/>'
+        '<circle class="dot" cx="600" cy="41.1" r="4" style="fill:var(--dp-accent-ink)"/>'
         "</svg>"
     )
 
@@ -2402,16 +2402,16 @@ def _hero_chart_html() -> str:
         f'<div class="dpst-chart"><div class="c-head"><span class="c-title">{head_title}</span>{badge}</div>'
         f'<div class="c-plot">{axis}<svg class="spark" viewBox="0 0 610 200" preserveAspectRatio="none" aria-hidden="true">'
         '<defs><linearGradient id="dpstSparkFill" x1="0" y1="0" x2="0" y2="1">'
-        '<stop offset="0%" stop-color="#34C9A0" stop-opacity="0.32"/>'
-        '<stop offset="100%" stop-color="#34C9A0" stop-opacity="0"/></linearGradient>'
+        '<stop offset="0%" style="stop-color:var(--dp-accent)" stop-opacity="0.32"/>'
+        '<stop offset="100%" style="stop-color:var(--dp-accent)" stop-opacity="0"/></linearGradient>'
         '<filter id="dpstGlow" x="-5%" y="-20%" width="110%" height="140%"><feGaussianBlur stdDeviation="3" result="b"/>'
         '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>'
         f'<g class="grid">{grid}</g>'
         f'<path class="area" d="{path} L600,200 L0,200 Z" fill="url(#dpstSparkFill)"/>'
-        f'<path class="line" d="{path}" fill="none" stroke="#34C9A0" stroke-width="2.2" filter="url(#dpstGlow)" '
+        f'<path class="line" d="{path}" fill="none" style="stroke:var(--dp-accent)" stroke-width="2.2" filter="url(#dpstGlow)" '
         'stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
-        f'<circle class="halo" cx="{end_x:.1f}" cy="{end_y:.1f}" r="9" fill="#34C9A0" fill-opacity="0.25"/>'
-        f'<circle class="dot" cx="{end_x:.1f}" cy="{end_y:.1f}" r="4" fill="#BDEFDF"/>'
+        f'<circle class="halo" cx="{end_x:.1f}" cy="{end_y:.1f}" r="9" style="fill:var(--dp-accent)" fill-opacity="0.25"/>'
+        f'<circle class="dot" cx="{end_x:.1f}" cy="{end_y:.1f}" r="4" style="fill:var(--dp-accent-ink)"/>'
         f'</svg></div>{foot}</div>'
     )
 

@@ -1,11 +1,32 @@
 # Configuración de Streamlit para la app (robot_analitico/app.py).
 # Streamlit lee este archivo desde la carpeta del script principal, así que
 # aplica igual al correr localmente (`streamlit run app.py`) y en Streamlit Cloud.
+#
+# Dos temas: claro (predeterminado en DPST) y oscuro. El interruptor sol/luna del
+# encabezado cambia entre ellos (ver src/ui_fx.py); estos valores pintan los
+# componentes nativos de Streamlit (tablas, campos, menús, calendarios) y deben
+# coincidir con las variables --dp-* de src/ui_fx.py.
 
 [theme]
-base="dark"
+font="sans serif"
+baseRadius="10px"
+
+[theme.light]
+primaryColor="#2563EB"
+backgroundColor="#F3F6FB"
+secondaryBackgroundColor="#FFFFFF"
+textColor="#0B1F3A"
+borderColor="#D7DFEA"
+linkColor="#1D4ED8"
+dataframeHeaderBackgroundColor="#EEF3FA"
+dataframeBorderColor="#E2E8F0"
+
+[theme.dark]
 primaryColor="#34C9A0"
 backgroundColor="#0A0F1C"
 secondaryBackgroundColor="#121A2B"
 textColor="#E8EDF6"
-font="sans serif"
+borderColor="#24304A"
+linkColor="#6FE3C1"
+dataframeHeaderBackgroundColor="#121A2B"
+dataframeBorderColor="#1E2A40"
