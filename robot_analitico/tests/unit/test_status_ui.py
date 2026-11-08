@@ -30,3 +30,12 @@ def test_error_card_and_skeleton_have_no_technical_or_numeric_noise():
     for kind in ("table", "chart", "cards", "news"):
         sk = skeleton_html(kind, "Consultando…")
         assert "Consultando" in sk and not any(ch.isdigit() for ch in sk.split("<svg")[0].replace("dpst", ""))
+
+
+def test_quota_limit_is_a_warning_with_reason_not_a_red_error():
+    from src.status_ui import STATES
+    state = {}
+    set_state(state, "alpha_vantage", classify("límite de consultas alcanzado"), "límite de consultas alcanzado")
+    assert state[STATE_KEY]["alpha_vantage"]["status"] == "limit" and STATES["limit"][1] == "warn"
+    html = status_center_html(state)
+    assert "Límite alcanzado" in html and "cupo gratuito" in html and "con error" not in html
