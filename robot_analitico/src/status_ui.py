@@ -30,7 +30,17 @@ STATES = {
     "error": ("Error", "bad", "alert"),
     "nodata": ("Datos no disponibles", "warn", "info"),
     "nokey": ("Falta configuración", "warn", "key"),
+    "limit": ("Límite alcanzado", "warn", "clock"),
     "unverified": ("Sin verificar", "neutral", "clock"),
+}
+# Qué significa cada estado y qué hacer (se muestra en el panel junto al motivo real).
+REASONS = {
+    "offline": "No hubo conexión con el servidor de la fuente. Revisa internet y vuelve a probar.",
+    "error": "La fuente respondió algo inesperado. Vuelve a probar más tarde; el detalle quedó en el registro.",
+    "nodata": "La fuente respondió, pero sin datos para lo pedido (ticker, fechas o tema).",
+    "nokey": "Falta la clave de API en los secretos de la app (Settings → Secrets en Streamlit Cloud).",
+    "limit": "Se agotó el cupo gratuito de consultas de hoy. Se libera solo (normalmente al día siguiente); "
+             "las demás fuentes siguen funcionando.",
 }
 # servicio → (nombre visible, fuente, módulo donde se usa)
 SERVICES = {
@@ -58,6 +68,8 @@ def now_utc() -> str:
 def classify(detail: str) -> str:
     """Tipo de fallo a partir del mensaje original (que se conserva en el registro)."""
     d = (detail or "").lower()
+    if "límite" in d or "limite" in d or "rate limit" in d or "too many requests" in d or "429" in d:
+        return "limit"
     if any(h in d for h in _NODATA_HINTS):
         return "nodata"
     if any(h in d for h in _OFFLINE_HINTS):
@@ -189,16 +201,21 @@ def status_center_html(state) -> str:
         when = s.get("when") or ""
         note = {"unverified": "Aún no se ha usado ni probado en esta sesión.",
                 "ok": "Respondió con datos en la última consulta."}.get(status, "")
+        reason = REASONS.get(status, "")
+        detail = (s.get("detail") or "").strip()
         rows.append(
             f'<li class="sc-row {tone}"><span class="sc-dot"></span><div class="sc-b"><b>{escape(name)}</b>'
             f'<span>{escape(module)} · {escape(source)}</span>'
             f'<span class="sc-w">{("Última consulta: " + escape(when)) if when else escape(note)}'
-            f'{(" · último éxito " + escape(s["last_ok"])) if s.get("last_ok") and status != "ok" else ""}</span></div>'
+            f'{(" · último éxito " + escape(s["last_ok"])) if s.get("last_ok") and status != "ok" else ""}</span>'
+            + (f'<span class="sc-r">{escape(reason)}{(" (" + escape(detail[:90]) + ")") if detail and status != "ok" else ""}</span>'
+               if reason else (f'<span class="sc-r ok">{escape(detail[:90])}</span>' if detail and status == "ok" else ""))
+            + '</div>'
             f'{pill_html(status)}</li>')
     n_ok, n_bad, n_warn = counts["good"], counts["bad"], counts["warn"]
     tone = "bad" if n_bad else ("warn" if n_warn else ("good" if n_ok else "neutral"))
     summary = (f"{n_ok} conectada{'s' if n_ok != 1 else ''}" + (f" · {n_bad} con error" if n_bad else "")
-               + (f" · {n_warn} sin datos" if n_warn else "")) if (n_ok or n_bad or n_warn) else "Sin verificar"
+               + (f" · {n_warn} con aviso" if n_warn else "")) if (n_ok or n_bad or n_warn) else "Sin verificar"
     return (
         f'<details class="ds-center {tone}" id="ds-center"><summary title="Estado de las conexiones">'
         f'<span class="sc-dot"></span><span class="sc-s">{escape(summary)}</span><span class="sc-run">Actualizando…</span></summary>'

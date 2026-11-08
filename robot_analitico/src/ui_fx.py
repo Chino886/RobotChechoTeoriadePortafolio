@@ -1191,6 +1191,8 @@ html.dpst-running .ds-center > summary .sc-dot { background: var(--dp-accent); a
 .sc-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 1px solid rgba(var(--dp-line-rgb), 0.07); margin: 0; }
 .sc-b { flex: 1; min-width: 0; display: flex; flex-direction: column; } .sc-b b { color: var(--dp-ink); font-size: 0.82rem; }
 .sc-b span { font-size: 0.72rem; color: var(--dp-muted); } .sc-b .sc-w { color: var(--dp-faint); }
+.sc-b .sc-r { margin-top: 2px; color: var(--dp-text-1); line-height: 1.35; } .sc-row.bad .sc-r { color: var(--dp-red); } .sc-row.warn .sc-r { color: var(--dp-amber-ink); }
+.sc-b .sc-r.ok { color: var(--dp-muted); }
 html.dpst-present .ds-center { display: none; }
 /* Indicador global mientras la app ejecuta una consulta o un cálculo */
 #dpst-runbar { position: fixed; z-index: 999993; top: 0; left: 0; right: 0; height: 3px; pointer-events: none; opacity: 0; transition: opacity .2s;
