@@ -209,8 +209,40 @@ def _explain(title: str, body: str):
 # Pestañas del laboratorio como botones en cuadrícula con borde verde. Apunta a clases
 # internas de Streamlit (st-key-*, data-testid) y puede requerir ajuste si cambia la versión.
 # Módulos del laboratorio (pestañas). También alimentan el buscador Ctrl/⌘ + K de app.py.
-LAB_MODULES = ["Riesgo conjunto", "Estrés y estimadores", "Markowitz y fronteras", "Black-Litterman",
-               "Rebalanceo", "Backtest", "Beta, CAPM y valoración", "Ficha técnica", "Exportar"]
+LAB_MODULES = [f"{i} · {name}" for i, name in enumerate(
+    ["Riesgo conjunto", "Estrés y estimadores", "Markowitz y fronteras", "Black-Litterman",
+     "Rebalanceo", "Backtest", "Beta, CAPM y valoración", "Ficha técnica", "Exportar"], start=1)]
+# Título fácil (para quien nunca ha invertido) + nombre técnico, en el mismo orden que LAB_MODULES.
+MODULE_TITLES = [
+    ("¿Se mueven juntas?", "Riesgo conjunto: covarianza y correlación"),
+    ("¿Qué pasa si todo sale mal?", "Estrés y estimadores de riesgo"),
+    ("La mejor mezcla", "Markowitz y frontera eficiente (CML)"),
+    ("Mezclar datos con opiniones", "Black-Litterman"),
+    ("Volver a acomodar la cartera", "Rebalanceo simulado"),
+    ("¿Cómo habría funcionado?", "Backtest walk-forward"),
+    ("Riesgo frente al mercado", "Beta, CAPM y valoración"),
+    ("La hoja de vida de la cartera", "Ficha técnica (estructura de la Superintendencia Financiera)"),
+    ("Guardar y comprobar", "Exportar traza y snapshot"),
+]
+SOURCE_SHORT = {SOURCE_TWO: "Caso docente", SOURCE_SYNTH: "Sintético", SOURCE_MARKET: "Mercado real"}
+
+# Estructura (no colores): tarjetas redondeadas con aire, pestañas tipo SaaS y títulos de doble etiqueta.
+LAB_STRUCT_CSS = """
+<style>
+.st-key-lab_assumptions, [class*="st-key-lab_module_"] {
+    border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem;
+}
+[data-testid="stTab"] { border-radius: 8px; padding: 8px 16px; font-weight: 500; }
+.module-title { font-size: 1.2rem; font-weight: 700; margin-bottom: 2px; }
+.module-subtitle { font-size: 0.85rem; opacity: 0.7; margin-bottom: 15px; }
+</style>
+"""
+
+
+def _module_header(i: int) -> None:
+    title, subtitle = MODULE_TITLES[i]
+    st.markdown(f'<div class="module-title">{i + 1}. {title}</div><div class="module-subtitle">{subtitle}</div>',
+                unsafe_allow_html=True)
 
 LAB_NAV_CSS = """
 <style>
@@ -614,10 +646,7 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None
                                  text=[asset], textposition="top center", showlegend=False,
                                  marker=dict(size=7, color="rgba(230,230,230,0.7)")))
     fig.update_layout(title="Frontera de mínima varianza calculada por optimización", xaxis_title="Volatilidad anualizada",
-                      yaxis_title="Rendimiento esperado anualizado", xaxis_tickformat=".0%", yaxis_tickformat=".0%", height=520, **LAYOUT)
-    st.plotly_chart(polish(fig), config=PLOTLY_CONFIG)
-    if frontier.empty:
-        st.warning(f"Frontera no dibujada: {frontier.attrs.get('estado', 'sin datos')}")
+                      yaxis_title="Rendimiento esperado anualizado", xaxis_tickformat=".0%", yaxis_tickformat=".0%", height=480, **LAYOUT)
 
     rows = []
     for res in (gmv, tangent, personal, top):
@@ -637,8 +666,20 @@ def _tab_markowitz(lab: LabData, rf_ea: float, gamma: float, bounds, groups=None
                   "sharpe": float((res.mean - rf) / res.volatility) if res.ok and res.volatility > 0 else None,
                   "weights": {a: float(res.weights[a]) for a in lab.mu.index} if res.ok else None}
                  for res in (gmv, tangent, personal, top)]})
-    st.dataframe(table.style.format({c: "{:.2%}" for c in ["rendimiento anual", "volatilidad anual", *lab.mu.index]} | {"Sharpe (por periodo)": "{:.3f}"},
-                                    na_rep="—"))
+    col_datos, col_grafico = st.columns([2, 3])
+    with col_datos:
+        st.markdown("**Carteras y sus pesos**")
+        shown = table.T.astype(object)
+        for row in shown.index:
+            fmt = "{:.3f}" if row == "Sharpe (por periodo)" else "{:.2%}"
+            shown.loc[row] = [fmt.format(v) if isinstance(v, (int, float, np.floating)) and pd.notna(v)
+                              else ("—" if v is None or (isinstance(v, float) and pd.isna(v)) else v)
+                              for v in shown.loc[row]]
+        st.dataframe(shown, use_container_width=True, height=440)
+    with col_grafico:
+        st.plotly_chart(polish(fig), config=PLOTLY_CONFIG, use_container_width=True)
+    if frontier.empty:
+        st.warning(f"Frontera no dibujada: {frontier.attrs.get('estado', 'sin datos')}")
     for res in (gmv, tangent, personal, top):
         if not res.ok:
             st.warning(f"**{res.name}:** {res.status}. {res.message}")
@@ -1525,7 +1566,43 @@ def render_portfolio_lab() -> None:
     _render_live_quote()
     st.markdown("---")
 
-    source = st.radio("Fuente de datos del laboratorio", [SOURCE_TWO, SOURCE_SYNTH, SOURCE_MARKET], key="lab_source")
+    st.markdown(LAB_STRUCT_CSS, unsafe_allow_html=True)
+    ctrl = _load_json("dos_activos.json")
+    with st.container(border=True, key="lab_assumptions"):
+        st.markdown('<div class="module-title">Supuestos de la simulación</div>'
+                    '<div class="module-subtitle">Decisión del equipo · al abrir se ven los del ejemplo del profesor</div>',
+                    unsafe_allow_html=True)
+        c1, c2, c3, c4, c5 = st.columns(5)
+        source = c1.selectbox("Fuente", [SOURCE_TWO, SOURCE_SYNTH, SOURCE_MARKET], format_func=SOURCE_SHORT.get,
+                              key="lab_source",
+                              help="- **Caso docente:** el ejemplo de dos empresas del profesor.\n"
+                                   "- **Sintético:** 20 empresas inventadas para practicar.\n"
+                                   "- **Mercado real:** las empresas que pusiste en Comparación.")
+        currency_choice = c2.selectbox(
+            "Moneda", list(SUPPORTED_BASES), index=0, key="lab_base_currency", disabled=source != SOURCE_MARKET,
+            help="Decisión del equipo. En qué moneda se miran los precios: dólares (USD) o pesos (COP). "
+                 "Solo aplica con **Mercado real**; con COP cada precio se pasa a pesos con el dólar de ese día.")
+        rf_ea = c3.number_input("Tasa libre de riesgo (Rf)", value=float(ctrl["rf"]), step=0.005, format="%.4f", key="lab_rf",
+                                help="Lo que ganarías al año **sin arriesgar nada**, por ejemplo prestándole al gobierno. "
+                                     "0,03 = 3 %. Mira la pestaña Tasas soberanas.")
+        gamma = c4.number_input("Aversión al riesgo (γ)", value=float(ctrl["gamma"]), min_value=0.1, step=0.5, key="lab_gamma",
+                                help="Qué tanto te asusta perder. 2 = te arriesgas bastante; 10 = prefieres ir a la segura.")
+        lo, hi = c5.slider("Límites de peso", min_value=-1.0, max_value=2.0,
+                           value=(float(ctrl["bounds"][0][0]), float(ctrl["bounds"][0][1])), step=0.05, format="%.2f",
+                           key="lab_weight_range",
+                           help="Lo **menos** y lo **más** que puede tener cada empresa. 0 a 1 = entre 0 % y 100 %; "
+                                "0 a 0,4 = máximo 40 % en una sola empresa.")
+        unlimited = st.toggle("Sin límites de peso (cortos y apalancamiento ilimitados)", value=False, key="lab_unlimited",
+                              help="Quita los límites: permite apostar en contra de una empresa o pedir prestado. Solo para comparar con la teoría.")
+        max_target_ea = None
+        if unlimited or lo < 0:
+            max_target_ea = st.number_input(
+                "Rendimiento objetivo máximo para dibujar la frontera (anual; decisión del equipo)", value=0.0, step=0.01,
+                format="%.4f", key="lab_max_target",
+                help="Con cortos el rendimiento esperado puede crecer sin fin; la frontera se dibuja hasta este valor. "
+                     "0 = no dibujar más allá de lo que las cotas permitan.")
+        _explain("¿Qué significa cada regla y qué pongo?", AYUDA["supuestos"])
+
     if source == SOURCE_TWO:
         lab = _load_lab_data(source)
         st.info("**Caso docente de control.** Parámetros anuales dados (μ, Σ): sirve para reconstruir los cálculos a mano.")
@@ -1542,10 +1619,7 @@ def render_portfolio_lab() -> None:
         currency, fx_note = None, None
         if source == SOURCE_MARKET:
             from_ccy = str(getattr(st.session_state.get("comparison_result"), "base_currency", None) or "USD").upper()
-            currency = st.selectbox(
-                "Moneda base de la cartera (decisión del equipo)", list(SUPPORTED_BASES), index=0, key="lab_base_currency",
-                help="La moneda del mandato la decide el equipo. USD por defecto. Con COP, cada precio se convierte con "
-                     "USDCOP=X: P_COP = P_USD · FX, y los rendimientos quedan 1 + R_COP = (1 + R_USD)(1 + R_FX) (guía 3.2).")
+            currency = currency_choice
             try:
                 with st.spinner(f"Convirtiendo a {currency}..."):
                     prices, fx_note = _to_base_currency(prices, from_ccy, currency)
@@ -1567,43 +1641,20 @@ def render_portfolio_lab() -> None:
         lab.currency, lab.fx_note = currency, fx_note
     st.caption(lab.label + (" Frecuencia nativa: anual." if lab.m == 1 else f" Frecuencia nativa: {lab.m} periodos por año."))
 
-    with st.container(border=True):
-        st.markdown("**Reglas del ejercicio** (las decide el equipo; al abrir se ven las del ejemplo del profesor)")
-        ctrl = _load_json("dos_activos.json")
-        c1, c2, c3, c4 = st.columns(4)
-        rf_ea = c1.number_input("Tasa libre de riesgo (efectiva anual)", value=float(ctrl["rf"]), step=0.005, format="%.4f", key="lab_rf",
-                                help="Lo que ganarías al año **sin arriesgar nada**, por ejemplo prestándole al gobierno. "
-                                     "0,03 = 3 %. Mira la pestaña Tasas soberanas.")
-        gamma = c2.number_input("γ aversión al riesgo", value=float(ctrl["gamma"]), min_value=0.1, step=0.5, key="lab_gamma",
-                                help="Qué tanto te asusta perder. 2 = te arriesgas bastante; 10 = prefieres ir a la segura.")
-        lo = c3.number_input("Peso mínimo por activo", value=float(ctrl["bounds"][0][0]), step=0.05, format="%.2f", key="lab_lo",
-                             help="Lo **menos** que puede tener cada empresa. 0 = puede quedar en cero.")
-        hi = c4.number_input("Peso máximo por activo", value=float(ctrl["bounds"][0][1]), step=0.05, format="%.2f", key="lab_hi",
-                             help="Lo **más** que puede tener cada empresa. 1 = hasta el 100 %; 0,25 = máximo 25 %.")
-        unlimited = st.toggle("Sin límites de peso (cortos y apalancamiento ilimitados)", value=False, key="lab_unlimited",
-                              help="Quita los límites de arriba: permite apostar en contra de una empresa o pedir prestado. Solo para comparar con la teoría.")
-        max_target_ea = None
-        if unlimited or lo < 0:
-            max_target_ea = st.number_input(
-                "Rendimiento objetivo máximo para dibujar la frontera (anual; decisión del equipo)", value=0.0, step=0.01,
-                format="%.4f", key="lab_max_target",
-                help="Con cortos el rendimiento esperado puede crecer sin fin; la frontera se dibuja hasta este valor. "
-                     "0 = no dibujar más allá de lo que las cotas permitan.")
-        _explain("¿Qué significa cada regla y qué pongo?", AYUDA["supuestos"])
-        with st.expander("Cotas por activo y topes por sector (opcional)"):
-            st.caption("Por defecto todos los activos usan el mínimo y máximo de arriba. Aquí se pueden cambiar por activo y "
-                       "agrupar activos en sectores con un peso máximo por sector (decisión del equipo).")
-            _explain("¿Qué pongo en esta tabla?", AYUDA["cotas"])
-            assets = list(lab.mu.index)
-            per_asset = st.data_editor(
-                pd.DataFrame({"activo": assets, "mínimo": [lo] * len(assets), "máximo": [hi] * len(assets), "sector": [""] * len(assets)}),
-                key=f"lab_bounds_{abs(hash((tuple(assets), lo, hi)))}", hide_index=True, disabled=["activo"])
-            sectors = sorted({str(x).strip() for x in per_asset["sector"] if str(x).strip() and str(x) != "nan"})
-            caps = {}
-            if sectors:
-                cap_df = st.data_editor(pd.DataFrame({"sector": sectors, "peso máximo": [1.0] * len(sectors)}),
-                                        key=f"lab_caps_{abs(hash(tuple(sectors)))}", hide_index=True, disabled=["sector"])
-                caps = dict(zip(cap_df["sector"], cap_df["peso máximo"].astype(float)))
+    with st.expander("Cotas por activo y topes por sector (opcional)"):
+        st.caption("Por defecto todos los activos usan el mínimo y máximo de arriba. Aquí se pueden cambiar por activo y "
+                   "agrupar activos en sectores con un peso máximo por sector (decisión del equipo).")
+        _explain("¿Qué pongo en esta tabla?", AYUDA["cotas"])
+        assets = list(lab.mu.index)
+        per_asset = st.data_editor(
+            pd.DataFrame({"activo": assets, "mínimo": [lo] * len(assets), "máximo": [hi] * len(assets), "sector": [""] * len(assets)}),
+            key=f"lab_bounds_{abs(hash((tuple(assets), lo, hi)))}", hide_index=True, disabled=["activo"])
+        sectors = sorted({str(x).strip() for x in per_asset["sector"] if str(x).strip() and str(x) != "nan"})
+        caps = {}
+        if sectors:
+            cap_df = st.data_editor(pd.DataFrame({"sector": sectors, "peso máximo": [1.0] * len(sectors)}),
+                                    key=f"lab_caps_{abs(hash(tuple(sectors)))}", hide_index=True, disabled=["sector"])
+            caps = dict(zip(cap_df["sector"], cap_df["peso máximo"].astype(float)))
     bounds = ([(None, None)] * len(lab.mu) if unlimited
               else [(float(r["mínimo"]), float(r["máximo"])) for _, r in per_asset.iterrows()])
     # La frontera muestra μ anualizado como μ·m (convención aritmética): el tope anual se divide entre m.
@@ -1617,23 +1668,32 @@ def render_portfolio_lab() -> None:
     with st.container(key="lab_nav"):
         tabs = st.tabs(LAB_MODULES)
     results = None
-    with tabs[0]:
+    with tabs[0], st.container(border=True, key="lab_module_0"):
+        _module_header(0)
         w_test = _tab_risk(lab)
-    with tabs[1]:
+    with tabs[1], st.container(border=True, key="lab_module_1"):
+        _module_header(1)
         _tab_stress(lab, w_test, bounds, groups)
-    with tabs[2]:
+    with tabs[2], st.container(border=True, key="lab_module_2"):
+        _module_header(2)
         results = _tab_markowitz(lab, rf_ea, gamma, bounds, groups, max_target)
-    with tabs[3]:
+    with tabs[3], st.container(border=True, key="lab_module_3"):
+        _module_header(3)
         _tab_black_litterman(lab, rf_ea, gamma, bounds, groups)
-    with tabs[4]:
+    with tabs[4], st.container(border=True, key="lab_module_4"):
+        _module_header(4)
         _tab_rebalance(lab, gamma, bounds, groups)
-    with tabs[5]:
+    with tabs[5], st.container(border=True, key="lab_module_5"):
+        _module_header(5)
         _tab_backtest(lab, rf_ea, gamma, bounds, groups)
-    with tabs[6]:
+    with tabs[6], st.container(border=True, key="lab_module_6"):
+        _module_header(6)
         _tab_capm(lab, results, rf_ea)
-    with tabs[7]:
+    with tabs[7], st.container(border=True, key="lab_module_7"):
+        _module_header(7)
         sector_map = {a: str(sec).strip() for a, sec in zip(per_asset["activo"], per_asset["sector"])
                       if str(sec).strip() and str(sec) != "nan"}
         _tab_factsheet(lab, results, rf_ea, gamma, bounds, groups, sector_map, unlimited)
-    with tabs[8]:
+    with tabs[8], st.container(border=True, key="lab_module_8"):
+        _module_header(8)
         _tab_export(lab, rf_ea, gamma, bounds, groups, results)

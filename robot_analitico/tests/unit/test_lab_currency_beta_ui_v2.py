@@ -43,11 +43,11 @@ def test_lab_cop_base_currency_betas_portfolio_betas_and_hamada(monkeypatch):
     at.session_state["terms_accepted"] = True
     at.session_state["comparison_result"] = comparison
     at.run()
-    at.radio(key="lab_source").set_value(laboratorio_v2.SOURCE_MARKET).run()
+    at.selectbox(key="lab_source").set_value(laboratorio_v2.SOURCE_MARKET).run()
     assert not at.exception
     base = at.selectbox(key="lab_base_currency")
     assert base.value == "USD"  # por defecto; la moneda del mandato la decide el equipo
-    assert "decisión del equipo" in base.label
+    assert "Decisión del equipo" in base.help  # la barra de supuestos lo dice también en su título
     base.set_value("COP").run()
     assert not at.exception
     assert any("Moneda base: COP" in c.value and "USDCOP=X" in c.value for c in at.caption)
@@ -80,7 +80,7 @@ def test_lab_performance_capm_and_factsheet(monkeypatch):
     at.session_state["terms_accepted"] = True
     at.session_state["comparison_result"] = comparison
     at.run()
-    at.radio(key="lab_source").set_value(laboratorio_v2.SOURCE_MARKET).run()
+    at.selectbox(key="lab_source").set_value(laboratorio_v2.SOURCE_MARKET).run()
     at.text_input(key="lab_beta_bench").input("^GSPC").run()
     assert not at.exception
     frames = [d.value for d in at.dataframe]
