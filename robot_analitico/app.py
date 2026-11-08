@@ -5,8 +5,52 @@ Portafolios, Tech Business School - Universidad EIA.
 """
 import base64
 from dataclasses import asdict
+import importlib
 import json
+import os
+import sys
 from pathlib import Path
+
+
+def _refresh_project_modules() -> None:
+    """
+    Si GitHub actualizó un módulo propio (src/…, laboratorio_v2.py) pero el servidor sigue con
+    la versión vieja en memoria (pasa en Streamlit Cloud tras un despliegue), se recarga antes
+    de importarlo. Así app.py nunca llama una función nueva sobre un módulo viejo.
+    """
+    base = Path(__file__).resolve().parent
+    for name in list(sys.modules):
+        if not (name == "laboratorio_v2" or name == "ayuda" or name.startswith("src.")):
+            continue
+        mod = sys.modules.get(name)
+        path = getattr(mod, "__file__", None)
+        if not path or not str(Path(path).resolve()).startswith(str(base)):
+            continue
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        # Sin marca = se importó antes de esta versión de app.py (no se sabe si está al día): se recarga.
+        if getattr(mod, "_dpst_mtime", None) != mtime:
+            break
+    else:
+        return
+    # Recargar todos los módulos propios en orden de dependencia (los de abajo usan a los de arriba).
+    order = ["src.ui_fx", "src.charts", "src.dashboard", "src.status_ui", "src.insights", "src.compare_view"]
+    names = order + sorted(n for n in sys.modules if (n.startswith("src.") or n in ("ayuda", "laboratorio_v2"))
+                           and n not in order and n != "laboratorio_v2") + ["laboratorio_v2"]
+    for name in names:
+        mod = sys.modules.get(name)
+        if mod is None:
+            continue
+        try:
+            mod = importlib.reload(mod)
+            mod._dpst_mtime = os.path.getmtime(mod.__file__)
+        except Exception:  # si un módulo no se puede recargar, se usa el que ya estaba
+            pass
+
+
+_refresh_project_modules()
 
 import feedparser
 import pandas as pd
