@@ -2449,6 +2449,12 @@ def render_insights_page() -> None:
         'vender ni cuánto invertir. Usa únicamente los resultados de esta sesión; si un resultado no existe, lo dice y '
         'explica el concepto en general. Motor local de DPST: no envía tus datos a ningún servicio de IA.</span></div>',
         unsafe_allow_html=True)
+    st.markdown(
+        '<div class="ins-note" style="margin-top:0.8rem">' + icon("bot", 16) + '<span><b>¿Qué es esto?</b> Es el '
+        '<b>asistente del bot DPST</b>: un chat que te explica, en palabras simples, lo que ya calculaste en las otras '
+        'pestañas. <b>Cómo usarlo:</b> 1) a la izquierda escoge un resultado (o deja «Ninguno» para una explicación '
+        'general); 2) pulsa una pregunta sugerida o escribe la tuya abajo; 3) lee la respuesta a la derecha.</span></div>',
+        unsafe_allow_html=True)
     asset, comparison, ctx = _insights_inputs()
     opts = context_options(asset, comparison, ctx)
     left, right = st.columns([1, 2.2], gap="medium")
