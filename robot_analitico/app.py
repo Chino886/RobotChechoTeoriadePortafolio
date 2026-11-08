@@ -12,6 +12,21 @@ import sys
 from pathlib import Path
 
 
+def _loaded_mtime(mod) -> "int | None":
+    """Fecha del código que está en memoria: la marca de la última recarga o la del .pyc con que se importó."""
+    mark = getattr(mod, "_dpst_mtime", None)
+    if mark is not None:
+        return mark
+    try:
+        with open(mod.__cached__, "rb") as fh:
+            head = fh.read(16)
+        if int.from_bytes(head[4:8], "little") == 0:  # .pyc por fecha (no por hash)
+            return int.from_bytes(head[8:12], "little")
+    except (OSError, TypeError, AttributeError):
+        pass
+    return None  # sin forma de saberlo: no se toca
+
+
 def _refresh_project_modules() -> None:
     """
     Si GitHub actualizó un módulo propio (src/…, laboratorio_v2.py) pero el servidor sigue con
@@ -30,8 +45,7 @@ def _refresh_project_modules() -> None:
             mtime = os.path.getmtime(path)
         except OSError:
             continue
-        # Sin marca = se importó antes de esta versión de app.py (no se sabe si está al día): se recarga.
-        if getattr(mod, "_dpst_mtime", None) != mtime:
+        if _loaded_mtime(mod) not in (None, int(mtime)):
             break
     else:
         return
@@ -45,7 +59,7 @@ def _refresh_project_modules() -> None:
             continue
         try:
             mod = importlib.reload(mod)
-            mod._dpst_mtime = os.path.getmtime(mod.__file__)
+            mod._dpst_mtime = int(os.path.getmtime(mod.__file__))
         except Exception:  # si un módulo no se puede recargar, se usa el que ya estaba
             pass
 
