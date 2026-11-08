@@ -167,13 +167,18 @@ def activity_html(events: "list[dict]") -> str:
 
 
 def services_html(services: "list[Service]") -> str:
-    labels = {"ok": "Conectado", "fail": "Falló", "idle": "Sin probar"}
-    cells = "".join(
-        f'<li class="dash-svc {s.state}" data-tip="{escape(s.detail)}" tabindex="0">'
-        f'<span class="ds-dot" aria-hidden="true"></span><span class="ds-n">{escape(s.name)}</span>'
-        f'<span class="ds-s">{labels.get(s.state, s.state)}{(" · " + escape(s.when)) if s.when else ""}</span></li>'
-        for s in services
-    )
+    from src.status_ui import STATES  # mismos textos y colores del centro de estados
+    css = {"good": "ok", "bad": "fail", "warn": "warn", "info": "idle", "neutral": "idle"}
+    legacy = {"ok": "ok", "fail": "error", "idle": "unverified"}
+    cells = []
+    for s in services:
+        key = legacy.get(s.state, s.state)
+        text, tone, _ic = STATES.get(key, STATES["unverified"])
+        cells.append(
+            f'<li class="dash-svc {css[tone]}" data-tip="{escape(s.detail)}" tabindex="0">'
+            f'<span class="ds-dot" aria-hidden="true"></span><span class="ds-n">{escape(s.name)}</span>'
+            f'<span class="ds-s">{escape(text)}{(" · " + escape(s.when)) if s.when else ""}</span></li>')
+    cells = "".join(cells)
     return f'<ul class="dash-svcs">{cells}</ul>'
 
 

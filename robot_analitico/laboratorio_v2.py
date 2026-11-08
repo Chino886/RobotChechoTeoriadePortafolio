@@ -33,6 +33,7 @@ from src.capm import (
 )
 from src.backtest import ALL_STRATEGIES, ESTIMATORS, BacktestConfig, select_by_validation, walk_forward
 from src.insights import record as record_insight
+from src.status_ui import classify as status_classify, set_state as status_set
 from src.charts import DARK_LAYOUT, ELECTRIC_BLUE, ACCENT_GOLD, NEGATIVE, PLOTLY_CONFIG, POSITIVE, STAR_WHITE, polish
 from src.data import fetch_asset_data, resample_prices
 from src.data_quality import (
@@ -319,6 +320,9 @@ def _render_live_quote():
         if auto or clicked:
             quotes = fetch_quotes(tickers)
             current = {q.ticker: q for q in quotes}
+            n_ok = sum(1 for q in quotes if q.ok)
+            status_set(st.session_state, "yahoo_quote", "ok" if n_ok else status_classify(
+                "; ".join(str(q.error) for q in quotes)), f"{n_ok} de {len(quotes)} cotizaciones recibidas")
             st.session_state["lab_last_quotes"] = {**previous, **{t: q for t, q in current.items() if q.ok}}
             st.session_state["lab_quote_log"] = (st.session_state.get("lab_quote_log", []) + [
                 {"consulta": q.received_at, "ticker": q.ticker, "precio": q.price, "última barra": q.last_bar_at,

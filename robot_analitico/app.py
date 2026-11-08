@@ -61,6 +61,11 @@ from src.insights import CTX_KEY as INSIGHTS_CTX_KEY, HISTORY_KEY as INSIGHTS_HI
 from src.insights import SUGGESTIONS as INSIGHT_SUGGESTIONS, answer as insight_answer
 from src.insights import answer_html as insight_answer_html, context_options
 from src.insights import record as record_insight
+from src.status_ui import (STATE_KEY as STATUS_KEY, classify as status_classify, data_stamp_html, fetch_error,
+                          get_state as status_get, loading as status_loading, log as status_log, now_utc as status_now,
+                          set_state as status_set, show_error as show_status_error, status_center_html,
+                          sync_from_checks)
+from src.status_ui import CHECK_NAMES as STATUS_CHECK_NAMES
 from src.dashboard import Kpi, Service, TrackedAsset, dashboard_html, spark_data, track_activity
 from src.forecasting import (
     FORECAST_MODELS,
@@ -1005,8 +1010,14 @@ def render_comparison() -> None:
         if len(tickers) < 2:
             st.error("Escribe al menos 2 tickers para comparar.")
         else:
-            with st.spinner(f"Descargando y comparando {len(tickers)} activos..."):
+            with status_loading("table", f"Consultando Yahoo Finance · {len(tickers)} activos para comparar…", "yahoo_hist"):
                 assets = fetch_many(tickers, start_date, end_date, frequency)
+                n_ok = sum(1 for a in assets.values() if getattr(a, "ok", False))
+                if n_ok:
+                    status_set(st.session_state, "yahoo_hist", "ok", f"comparación: {n_ok} de {len(tickers)} activos con datos")
+                else:
+                    status_set(st.session_state, "yahoo_hist", status_classify(
+                        "; ".join(str(getattr(a, "error", "")) for a in assets.values())), "comparación sin datos")
 
                 # Conversión de monedas (RF-20 ampliado): se descarga el tipo
                 # de cambio de cada moneda distinta a USD presente entre los
@@ -1020,14 +1031,12 @@ def render_comparison() -> None:
                 fx_errors = []
                 for currency in currencies_needed:
                     fx_result = fetch_fx_to_usd(currency, start_date, end_date)
-                    st.write(
-                        f"DEBUG {currency}: ok={fx_result.ok}, ticker_usado={fx_result.ticker}, "
-                        f"error={fx_result.error}, "
-                        f"n_filas={0 if fx_result.prices is None else len(fx_result.prices)}"
-                    )
-                    if fx_result.prices is not None and not fx_result.prices.empty:
-                        st.write("Primeras fechas:", fx_result.prices.index.min(), "- Últimas:", fx_result.prices.index.max())
-                        st.dataframe(fx_result.prices.head(3))
+                    # Diagnóstico técnico del tipo de cambio: al registro, no a la pantalla.
+                    status_log.info("FX %s: ok=%s ticker=%s error=%s n=%s rango=%s", currency, fx_result.ok,
+                                    fx_result.ticker, fx_result.error,
+                                    0 if fx_result.prices is None else len(fx_result.prices),
+                                    None if fx_result.prices is None or fx_result.prices.empty else
+                                    (fx_result.prices.index.min(), fx_result.prices.index.max()))
                     if fx_result.ok and fx_result.prices is not None:
                         fx_result.prices = resample_prices(fx_result.prices, frequency)
                         fx_rates[currency] = fx_result.prices["adjusted_close"]
@@ -1037,10 +1046,11 @@ def render_comparison() -> None:
                 periods_per_year = FREQUENCY_PERIODS_PER_YEAR.get(frequency, 252)
                 result = build_comparison(assets, frequency, periods_per_year, fx_rates=fx_rates)
             if fx_errors:
-                st.warning(
-                    "No se pudo obtener el tipo de cambio para: " + "; ".join(fx_errors) +
-                    ". Los activos en esas monedas quedarán excluidos de la comparación."
-                )
+                show_status_error(
+                    "Preselección · Comparación", "No se pudo obtener el tipo de cambio de algunas monedas",
+                    "Tipo de cambio a USD de: " + ", ".join(e.split("->")[0] for e in fx_errors),
+                    "Los activos en esas monedas quedan excluidos. Puedes comparar solo activos en USD o volver a intentar.",
+                    "; ".join(fx_errors), tone="warn")
             st.session_state["comparison_result"] = result
 
     result = st.session_state.get("comparison_result")
@@ -1048,7 +1058,9 @@ def render_comparison() -> None:
         return
 
     if not result.ok:
-        st.error(f"No se pudo construir la comparación: {result.reason}")
+        show_status_error("Preselección · Comparación", "No se pudo construir la comparación",
+                          "Tabla, mapa y preselección de los activos", "Revisa la lista de tickers y las fechas (ver activos "
+                          "excluidos abajo) y vuelve a pulsar «Comparar activos».", result.reason or "", tone="warn")
         if result.excluded:
             with st.expander(f"Activos excluidos ({len(result.excluded)})"):
                 for e in result.excluded:
@@ -1365,7 +1377,9 @@ def render_sovereign_rates() -> None:
     except Exception as exc:
         countries = []
         st.markdown(_rates_status_html(True), unsafe_allow_html=True)
-        st.error(f"No se pudo obtener de FRED la lista de países: {exc}")
+        fetch_error("Tasas soberanas", "FRED no entregó la lista de países", "Lista de países con tasa a 10 años",
+                    f"{type(exc).__name__}: {exc}", "fred",
+                    other_action="Puedes buscar el país a mano en el buscador de abajo o volver a intentar más tarde.")
     if not countries:
         _render_rates_free_search(fred_api_key)
         return
@@ -1427,15 +1441,20 @@ def _rates_chart(series_by_label: "dict[str, pd.Series]") -> go.Figure:
 def _render_rate_series(fred_api_key: str, info: dict, label: str, rates_start, rates_end,
                         compare: "list[dict] | None" = None) -> None:
     """Tasa actual, cambio en 12 meses, gráfica y tabla de la serie elegida."""
-    with st.spinner(f"Descargando de FRED la tasa de {label}..."):
+    with status_loading("chart", f"Consultando FRED · tasa de {label}…", "fred"):
         try:
             series = _fred_series(fred_api_key, info["id"], rates_start, rates_end)
         except Exception as exc:
-            st.error(f"Error al descargar la serie: {exc}")
+            fetch_error("Tasas soberanas", f"No se pudo descargar la tasa de {label}", f"Serie {info['id']} de FRED",
+                        f"{type(exc).__name__}: {exc}", "fred")
             return
     if series.empty:
-        st.warning(f"FRED no tiene observaciones de {label} entre esas fechas (último dato: {info['observation_end']}).")
+        status_set(st.session_state, "fred", "nodata", f"{info['id']} sin observaciones en el rango")
+        show_status_error("Tasas soberanas", f"FRED no tiene datos de {label} entre esas fechas",
+                          f"Observaciones de la serie {info['id']}",
+                          f"Amplía el rango de fechas (el último dato publicado es {info['observation_end']}).", tone="warn")
         return
+    status_set(st.session_state, "fred", "ok", f"{info['id']}: {len(series)} observaciones (puede venir de la caché de 6 h)")
 
     with st.container(key="rates_kpis"):
         m1, m2, m3, m4 = st.columns(4)
@@ -1455,7 +1474,8 @@ def _render_rate_series(fred_api_key: str, info: dict, label: str, rates_start, 
         try:
             s = _fred_series(fred_api_key, other["id"], rates_start, rates_end)
         except Exception as exc:
-            st.warning(f"No se pudo descargar la serie de {other['label']}: {exc}")
+            fetch_error("Tasas soberanas · comparar", f"No se pudo descargar la tasa de {other['label']}",
+                        f"Serie {other['id']} de FRED", f"{type(exc).__name__}: {exc}", "fred")
             continue
         if not s.empty:
             series_by_label[other["label"]] = s
@@ -1651,7 +1671,9 @@ def render_portfolio_forecast() -> None:
             for entry_idx, (ticker, amount) in enumerate(entries):
                 asset = fetch_asset_data(ticker, pf_start, pf_end)
                 if not asset.ok or asset.prices is None:
-                    st.error(f"**{ticker}**: {asset.error or 'sin datos'}")
+                    fetch_error("Preselección · Canasta", f"No se pudieron descargar los precios de {ticker}",
+                                f"Precios de {ticker} para la canasta", asset.error or "sin datos", "yahoo_hist",
+                                nodata_action="Revisa el ticker en la pestaña Tickers; los demás activos sí se pronostican.")
                     continue
                 asset.prices = resample_prices(asset.prices, pf_frequency)
                 if asset.prices.empty:
@@ -1975,10 +1997,29 @@ def _is_recent(raw, days: int = NEWS_MAX_AGE_DAYS) -> bool:
     return when >= pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=days)
 
 
+def _news_states(collected, ticker, markets) -> None:
+    """Estado de cada fuente de noticias según lo que respondió (sin consultas nuevas: lo de Alpha Vantage sale de su caché)."""
+    keys = {"Google News": "google_news", "Alpha Vantage": "alpha_vantage", "Yahoo Finance": "yahoo_news"}
+    for source, items in collected:
+        key = keys.get(source)
+        if not key:
+            continue
+        if items:
+            status_set(st.session_state, key, "ok", f"{len(items)} noticias recibidas (caché de hasta 1 h)")
+        elif source == "Alpha Vantage":
+            av = _fetch_alpha_vantage(ticker, None if ticker else GENERAL_NEWS_TOPIC, NEWS_PANEL_ITEMS)["status"]
+            status_set(st.session_state, key, "nokey" if "API key" in av else status_classify(av)
+                       if av != "sin resultados" else "nodata", av)
+        else:
+            status_set(st.session_state, key, "nodata", "sin noticias recibidas (la fuente no respondió o no tenía)")
+
+
 def _merged_recent_news(ticker: "str | None", limit: int, markets: bool = False) -> "tuple[list[dict], int]":
     """Une las fuentes, quita repetidas y viejas, verifica enlaces y devuelve (noticias, ocultas)."""
     seen, pool = set(), []
-    for source, items in _collect_news(ticker, markets):
+    collected = _collect_news(ticker, markets)
+    _news_states(collected, ticker, markets)
+    for source, items in collected:
         for item in items:
             key = str(item.get("title", "")).strip().lower()
             if key and key not in seen and _is_recent(item.get("published")):
@@ -2030,11 +2071,11 @@ def render_news_home() -> None:
         tab_general, tab_markets, tab_asset = st.tabs(
             ["Economía", "Mercados", f"Empresa: {ticker}" if ticker else "Empresa"])
         with tab_general:
-            with st.spinner("Buscando noticias..."):
+            with status_loading("news", "Consultando Google News y Alpha Vantage…"):
                 items, hidden = _merged_recent_news(None, NEWS_HOME_ITEMS)
             _show_news_carousel(items, hidden, "No se encontraron noticias económicas en este momento.", "Economía")
         with tab_markets:
-            with st.spinner("Buscando noticias de mercados..."):
+            with status_loading("news", "Consultando noticias de mercados…"):
                 items, hidden = _merged_recent_news(None, NEWS_HOME_ITEMS, markets=True)
             _show_news_carousel(items, hidden, "No se encontraron noticias de mercados en este momento.", "Mercados")
         with tab_asset:
@@ -2044,11 +2085,13 @@ def render_news_home() -> None:
                     "Escoge una empresa en <b>Preselección de activos</b> y aquí verás sus noticias."),
                     unsafe_allow_html=True)
             else:
-                with st.spinner(f"Buscando noticias de {ticker}..."):
+                with status_loading("news", f"Consultando noticias de {ticker}…"):
                     items, hidden = _merged_recent_news(ticker, NEWS_HOME_ITEMS)
                 _show_news_carousel(items, hidden, f"No se encontraron noticias recientes de {ticker}.", ticker)
-    except Exception:
-        st.info("No se pudieron cargar las noticias en este momento.")
+    except Exception as exc:
+        show_status_error("Inicio · Noticias", "No se pudieron cargar las noticias", "Noticias de la semana",
+                          "El resto del bot funciona igual. Recarga la página en unos minutos.",
+                          f"{type(exc).__name__}: {exc}", tone="warn")
 
 
 # dismissible=False: sin X ni Esc. Si se pudiera cerrar así, la app quedaría
@@ -2135,6 +2178,9 @@ def main() -> None:
         with tab_ins:  # al final: lee los resultados que acaban de mostrar las otras pestañas
             render_insights_page()
     render_dashboard()
+    # Centro de estados (pastilla fija del encabezado): refleja solo operaciones reales de esta sesión.
+    sync_from_checks(st.session_state, st.session_state.get("conn_check_log") or [])
+    st.markdown(status_center_html(st.session_state), unsafe_allow_html=True)
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
@@ -2225,8 +2271,10 @@ def render_tickers_page() -> None:
         "Es el **nombre corto** con el que una empresa aparece en la bolsa de valores.\n\n"
         "- Apple → **AAPL**\n- Coca-Cola → **KO**\n- Ecopetrol (en Nueva York) → **EC**\n\n"
         "El bot necesita ese código para buscar los precios de la empresa."))
-    with st.spinner("Cargando el directorio de empresas..."):
+    with status_loading("table", "Consultando el directorio de NASDAQ Trader…", "nasdaq"):
         directory, complete = _ticker_directory()
+    status_set(st.session_state, "nasdaq", "ok" if complete else "nodata",
+               f"{len(directory):,} empresas y fondos" if complete else "se usó la lista corta de respaldo")
 
     left, main = st.columns([1, 2.6], gap="medium")
     with left:
@@ -2254,8 +2302,9 @@ def render_tickers_page() -> None:
                 st.caption(f"{len(directory):,} empresas y fondos de las bolsas de Estados Unidos (directorio público de "
                            "NASDAQ Trader, se actualiza cada día).")
             else:
-                st.warning("No se pudo cargar el directorio completo en este momento; se muestra una lista corta de "
-                           "empresas conocidas.")
+                show_status_error("Tickers", "No se pudo cargar el directorio completo",
+                                  "Directorio de NASDAQ Trader (todas las empresas)",
+                                  "Puedes seguir con la lista corta de empresas conocidas o volver más tarde.", tone="warn")
             options = found.head(TICKER_TABLE_ROWS)
             ticker = None
             if not found.empty:
@@ -2662,21 +2711,21 @@ def _dashboard_assets() -> "list[TrackedAsset]":
 
 
 def _dashboard_services() -> "list[Service]":
-    log = st.session_state.get("conn_check_log") or []
+    """Estado real de cada fuente: la prueba de conexiones o, si no se ha hecho, la última operación de la sesión."""
     keys = _configured_keys()
     out = []
     for name in _connection_checks():
-        rows = [r for r in log if r.get("servicio") == name]
-        if rows:
-            r = rows[-1]
-            out.append(Service(name, "ok" if r.get("estado") == "conectado" else "fail", str(r.get("detalle", "")),
-                               str(r.get("hora (UTC)", ""))[11:16] + " UTC"))
-        else:
-            hint = "Aún sin probar en esta sesión: pulsa «Probar conexiones»."
+        key = STATUS_CHECK_NAMES.get(name)
+        s = status_get(st.session_state, key) if key else {"status": "unverified"}
+        status = s.get("status", "unverified")
+        if status == "unverified":
+            hint = "Aún sin usar ni probar en esta sesión: pulsa «Probar conexiones»."
             for label, has in keys.items():
                 if name.startswith(label.split()[0]):
                     hint += f" Clave {label}: {'configurada' if has else 'no configurada'}."
-            out.append(Service(name, "idle", hint))
+            out.append(Service(name, "unverified", hint))
+        else:
+            out.append(Service(name, status, s.get("detail", ""), (s.get("when") or "")[11:]))
     return out
 
 
@@ -2689,6 +2738,7 @@ def render_dashboard() -> None:
     if slot is None:
         return
     events = track_activity(st.session_state, LAB_TITLE)
+    sync_from_checks(st.session_state, st.session_state.get("conn_check_log") or [])
     result = st.session_state.get("asset_result")
     market = (f" · último dato de mercado <b>{html_escape(result.ticker)} {result.prices.index.max().date()}</b>"
               if result is not None and getattr(result, "ok", False) and result.prices is not None and len(result.prices) else "")
@@ -2900,7 +2950,11 @@ def _need_asset() -> bool:
     """True si ya hay un activo descargado; si no, deja un aviso dentro de la sección."""
     result = st.session_state.get("asset_result")
     if result is None or not result.ok:
-        st.info("Primero descarga un activo en **Datos del activo a probar**.")
+        st.markdown(empty_state_html(
+            "database", "Todavía no hay un activo descargado",
+            "Este análisis usa los precios del activo de <b>Datos del activo a probar</b>. Escribe un ticker allí y pulsa "
+            "«Descargar y limpiar». <button type=\"button\" class=\"dash-link\" data-dpst-go=\"Preselección de activos\" "
+            "data-dpst-open=\"Datos del activo a probar\">Ir a Datos del activo</button>"), unsafe_allow_html=True)
         return False
     return True
 
@@ -2925,16 +2979,20 @@ def render_asset_data() -> None:
                                  list(FREQUENCY_RULES.keys()))
 
     if st.button("Descargar y limpiar", type="primary"):
-        with st.spinner("Descargando..."):
+        with status_loading("chart", f"Consultando Yahoo Finance · precios de {ticker_input.strip().upper()}…", "yahoo_hist"):
             result = fetch_asset_data(ticker_input, start_date, end_date)
             if result.ok:
                 result.prices = resample_prices(result.prices, frequency)
         if result.ok:
             st.session_state["asset_result"] = result
             st.session_state["asset_frequency"] = frequency
+            st.session_state["asset_consulted"] = status_now()
+            status_set(st.session_state, "yahoo_hist", "ok", f"{result.ticker}: {len(result.prices)} observaciones")
         else:
             st.session_state.pop("asset_result", None)
-            st.error(f"{result.ticker}: {result.error}")
+            fetch_error("Preselección · Datos del activo", f"No se pudieron descargar los precios de {result.ticker}",
+                        "Precios históricos ajustados del activo", result.error or "sin datos", "yahoo_hist",
+                        nodata_action="Revisa el ticker en la pestaña Tickers (por ejemplo AAPL) o amplía el rango de fechas.")
 
     # El resumen queda visible aunque se abran o cierren otras secciones.
     result = st.session_state.get("asset_result")
@@ -2947,6 +3005,10 @@ def render_asset_data() -> None:
             f"último dato: {result.prices.index.max().date()} · "
             f"frecuencia: {st.session_state.get('asset_frequency')}"
         )
+        st.markdown(data_stamp_html(result.source, st.session_state.get("asset_consulted", ""),
+                                    str(result.prices.index.max().date()), "ok",
+                                    f"{len(result.prices)} observaciones · {st.session_state.get('asset_frequency')}"),
+                    unsafe_allow_html=True)
         if result.dropped_rows:
             st.warning(
                 f"Se descartaron {result.dropped_rows} filas inválidas "
