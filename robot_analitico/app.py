@@ -2080,7 +2080,7 @@ def main() -> None:
     # Estilos primero, para que la ventana de bienvenida y el disclaimer ya salgan con el diseño.
     render_header()
     render_sidebar_style()
-    apply_ui_fx(_command_items())
+    apply_ui_fx(_command_items(), _present_steps())
 
     if st.session_state.get("intro_cancelled", False):
         st.info("Saliste de la aplicación. Puedes cerrar esta pestaña.")
@@ -2396,6 +2396,18 @@ def render_insights_page() -> None:
             "tasa de FRED) y el asistente lo lee tal cual. No recalcula modelos ni inventa indicadores.\n"
             "- **Límites:** no da recomendaciones personalizadas de inversión; los supuestos de los modelos se señalan como "
             "supuestos, no como hechos.")
+
+
+def _present_steps() -> "list[dict]":
+    """Diapositivas del Modo presentación: las mismas pestañas, desplegables y módulos de siempre, en orden."""
+    pre = "Preselección de activos"
+    steps = [{"label": "Inicio · dashboard", "top": "Inicio"},
+             {"label": "Tickers", "top": "Tickers"}]
+    steps += [{"label": f"Preselección · {title}", "top": pre, "open": title} for title, _mi, _ic in PRESELECTION_MODULES]
+    steps.append({"label": "Tasas soberanas", "top": "Tasas soberanas"})
+    steps += [{"label": f"Laboratorio · {m}", "top": LAB_TITLE, "sub": m} for m in LAB_MODULES]
+    steps.append({"label": "DPST Financial Insights", "top": INSIGHTS_TITLE})
+    return steps
 
 
 def _command_items() -> "list[dict]":

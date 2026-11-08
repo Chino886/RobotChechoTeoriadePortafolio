@@ -1074,6 +1074,55 @@ html { font-optical-sizing: auto; }
 .ins-ans.refused .ins-title { color: var(--dp-amber-ink); }
 .ins-src { margin-top: 8px; font-size: 0.76rem; color: var(--dp-faint); }
 
+/* ===================== Modo presentación ===================== */
+#dpst-present-btn { position: fixed; z-index: 999991; top: calc(12px + env(safe-area-inset-top, 0px)); left: 64px; display: inline-flex; align-items: center; gap: 7px;
+    padding: 7px 13px; border-radius: 10px; cursor: pointer; font: 600 0.82rem/1 inherit; font-family: inherit; color: var(--dp-on-accent);
+    background: linear-gradient(180deg, var(--dp-accent-hi), var(--dp-accent-lo)); border: 0; box-shadow: 0 6px 18px rgba(var(--dp-accent-rgb), 0.28);
+    transition: transform .18s, box-shadow .2s; }
+#dpst-present-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(var(--dp-accent-rgb), 0.36); }
+#dpst-present-btn:focus-visible, #dpst-pbar button:focus-visible, #dpst-pbar select:focus-visible { outline: 2px solid var(--dp-accent); outline-offset: 2px; }
+#dpst-pbar { position: fixed; z-index: 999992; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, 140%); opacity: 0;
+    display: flex; align-items: center; gap: 6px; padding: 7px; border-radius: 16px; max-width: calc(100vw - 24px);
+    background: rgba(var(--dp-surface-rgb), 0.92); backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    border: 1px solid rgba(var(--dp-line-rgb), 0.16); box-shadow: 0 18px 44px rgba(var(--dp-shadow-rgb), calc(0.22 * var(--dp-shadow-k)));
+    transition: transform .35s cubic-bezier(.2,.8,.2,1), opacity .25s; pointer-events: none; }
+html.dpst-present #dpst-pbar { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+#dpst-pbar button { display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 12px; border-radius: 11px; cursor: pointer;
+    font: inherit; font-size: 0.82rem; font-weight: 600; color: var(--dp-ink); background: transparent; border: 1px solid transparent; transition: background .2s, color .2s; white-space: nowrap; }
+#dpst-pbar button:hover { background: rgba(var(--dp-accent-rgb), 0.09); color: var(--dp-accent-lo); }
+#dpst-pbar .pb-nav { width: 42px; padding: 0; justify-content: center; color: var(--dp-on-accent); background: linear-gradient(180deg, var(--dp-accent-hi), var(--dp-accent-lo)); }
+#dpst-pbar .pb-nav:hover { color: var(--dp-on-accent); filter: brightness(1.08); }
+#dpst-pbar .pb-exit { color: var(--dp-red); border-color: rgba(var(--dp-red-rgb), 0.3); }
+#dpst-pbar .pb-exit:hover { background: rgba(var(--dp-red-rgb), 0.08); color: var(--dp-red); }
+#dpst-pbar .pb-tool.icon { width: 38px; padding: 0; justify-content: center; }
+#dpst-pbar .pb-sep { width: 1px; height: 24px; background: rgba(var(--dp-line-rgb), 0.18); margin: 0 2px; }
+#dpst-pbar .pb-sel { display: inline-flex; align-items: center; gap: 8px; padding: 0 4px; }
+#dpst-pbar .pb-n { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.78rem; color: var(--dp-muted); min-width: 3.4rem; text-align: center; }
+#dpst-pbar select { font: inherit; font-size: 0.88rem; font-weight: 600; color: var(--dp-ink); max-width: 330px; padding: 8px 10px; border-radius: 10px;
+    background: var(--dp-surface-2); border: 1px solid rgba(var(--dp-line-rgb), 0.16); cursor: pointer; }
+/* Lo que se oculta o se agranda (solo vista; nada se borra del DOM) */
+html.dpst-present #dpst-k, html.dpst-present #dpst-theme, html.dpst-present #dpst-progress,
+html.dpst-present [data-testid="stHeader"], html.dpst-present [data-testid="stSidebar"], html.dpst-present [data-testid="stSidebarCollapsedControl"],
+html.dpst-present [data-testid="stExpandSidebarButton"], html.dpst-present .st-key-dpst_nav > [data-testid="stTabs"] > div > [role="tablist"],
+html.dpst-present .st-key-dpst_nav > [data-testid="stTabs"] > div > div[data-baseweb="tab-border"],
+html.dpst-present .dpst-notice, html.dpst-present .dpst-tape, html.dpst-present .st-key-dpst_home_footer,
+html.dpst-present .dpst-hero .meta, html.dpst-present #dash-toast + #dash-toast { display: none !important; }
+html.dpst-present { font-size: 17.5px; }
+html.dpst-present [data-testid="stMainBlockContainer"] { max-width: none !important; padding: 1.6rem clamp(16px, 3.2vw, 56px) 7.5rem !important; }
+html.dpst-present .dpst-page-title, html.dpst-present .dpst-hero h1 { font-size: clamp(2.4rem, 3.6vw, 3.6rem); }
+html.dpst-present .js-plotly-plot .gtitle { font-size: 20px !important; }
+html.dpst-present [data-testid="stPlotlyChart"], html.dpst-present .dpst-chart, html.dpst-present .dash-panel,
+html.dpst-present [data-testid="stExpander"] details { border-radius: 18px; }
+html.dpst-present [data-testid="stMetricValue"] { font-size: 2.3rem; }
+html.dpst-present [data-testid="stElementToolbar"] { opacity: 1 !important; }
+@media (max-width: 820px) {
+    #dpst-pbar .pb-tool span, #dpst-pbar .pb-exit span { display: none; }
+    #dpst-pbar .pb-tool, #dpst-pbar .pb-exit { width: 38px; padding: 0; justify-content: center; }
+    #dpst-pbar select { max-width: 150px; }
+    #dpst-present-btn span { display: none; } #dpst-present-btn { padding: 8px; }
+    html.dpst-present { font-size: 16px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
     [data-testid="stMainBlockContainer"] * { animation: none !important; }
     .dash-spark .l { stroke-dashoffset: 0; }
@@ -1721,6 +1770,147 @@ _FX_JS = r"""
     if (sc && last.length >= 2) sc.scrollTo({ top: last[last.length - 2].offsetTop - 8, behavior: reduce ? 'auto' : 'smooth' });
   }, 120); }).observe(D.body, { childList: true, subtree: true });
 
+  {  // bloque propio: sus nombres no chocan con el resto
+  /* ---------- Modo presentación ----------
+     Solo cambia la vista: una clase en <html> oculta lo secundario, agranda la tipografía y usa
+     todo el ancho. No hace rerun de Streamlit, así que los datos y lo escrito se conservan.
+     Navegación por «diapositivas» = pestañas, desplegables y módulos que ya existen. */
+  const STEPS = __STEPS__;
+  const PKEY = 'dpst_present';
+  let present = false, step = 0;
+  const ss = { get() { try { return P.sessionStorage.getItem(PKEY); } catch (e) { return null; } },
+               set(v) { try { v == null ? P.sessionStorage.removeItem(PKEY) : P.sessionStorage.setItem(PKEY, v); } catch (e) {} } };
+  const I = {
+    play: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4M10.5 7.8v4.4L14 10z"/></svg>',
+    prev: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>',
+    next: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
+    full: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
+    table: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></svg>',
+    zoom: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M11 8v6M8 11h6"/></svg>',
+    moon: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.8 6.8 0 0 0 10.7 10.7z"/></svg>',
+    x: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  };
+  const presBtn = D.createElement('button');
+  presBtn.id = 'dpst-present-btn'; presBtn.type = 'button';
+  presBtn.innerHTML = I.play + '<span>Modo presentación</span>';
+  presBtn.title = 'Modo presentación (tecla P)';
+  D.body.appendChild(presBtn);
+  const pbar = D.createElement('div');
+  pbar.id = 'dpst-pbar'; pbar.setAttribute('role', 'toolbar'); pbar.setAttribute('aria-label', 'Controles de presentación');
+  const opts = STEPS.map((s, i) => `<option value="${i}">${i + 1}. ${esc(s.label)}</option>`).join('');
+  pbar.innerHTML =
+    `<button type="button" class="pb-nav" data-p="prev" title="Anterior (←)" aria-label="Análisis anterior">${I.prev}</button>`
+    + `<label class="pb-sel"><span class="pb-n" aria-live="polite"></span><select aria-label="Ir a un módulo">${opts}</select></label>`
+    + `<button type="button" class="pb-nav" data-p="next" title="Siguiente (→)" aria-label="Análisis siguiente">${I.next}</button>`
+    + '<span class="pb-sep"></span>'
+    + `<button type="button" class="pb-tool" data-p="tables" title="Mostrar u ocultar tablas (T)">${I.table}<span>Tablas</span></button>`
+    + `<button type="button" class="pb-tool" data-p="zoom" title="Ampliar el gráfico visible (G)">${I.zoom}<span>Ampliar gráfico</span></button>`
+    + `<button type="button" class="pb-tool" data-p="full" title="Pantalla completa (F)">${I.full}<span>Pantalla completa</span></button>`
+    + `<button type="button" class="pb-tool icon" data-p="theme" title="Cambiar tema claro/oscuro" aria-label="Cambiar tema">${I.moon}</button>`
+    + `<button type="button" class="pb-exit" data-p="exit" title="Salir (Esc)">${I.x}<span>Salir</span></button>`;
+  D.body.appendChild(pbar);
+  const sel = pbar.querySelector('select');
+
+  function placePresBtn() {
+    const nav = D.querySelector('.st-key-dpst_nav');
+    presBtn.style.display = nav && !present ? '' : 'none';
+  }
+  function showStep(i, animate) {
+    if (!STEPS.length) return;
+    step = (i + STEPS.length) % STEPS.length;
+    const s = STEPS[step];
+    sel.value = String(step);
+    pbar.querySelector('.pb-n').textContent = `${step + 1} / ${STEPS.length}`;
+    ss.set(String(step));
+    const main = D.querySelector('[data-testid="stMainBlockContainer"]');
+    if (animate && main && !reduce) main.animate([{ opacity: 0.35, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }],
+                                                 { duration: 380, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    if (s.open) {
+      // Solo el módulo de esta diapositiva queda abierto (los demás se cierran con su propio clic).
+      setTimeout(() => {
+        const label = d => { const sm = d.querySelector(':scope > summary'), mk = sm && sm.querySelector('[data-testid="stMarkdownContainer"]');
+                             return ((mk || sm || {}).textContent || '').trim(); };
+        const mods = topModules(), keep = mods.filter(d => label(d).startsWith(s.open)).sort((a, b) => label(a).length - label(b).length)[0];
+        mods.forEach(d => { if (d.open && d !== keep) d.querySelector(':scope > summary').click(); });
+      }, 60);
+    }
+    goTo(s.top, s.open || null, s.sub ? () => setTimeout(() => clickTab('.st-key-lab_nav', s.sub), 120) : null);
+  }
+  function enter() {
+    if (present) return;
+    present = true; D.documentElement.classList.add('dpst-present');
+    const saved = Number(ss.get());
+    const cur = (D.querySelector('.st-key-dpst_nav [role=tab][aria-selected=true]') || {}).textContent;
+    const idx = Number.isFinite(saved) && ss.get() != null ? saved : Math.max(0, STEPS.findIndex(s => s.top === (cur || '').trim()));
+    placePresBtn(); showStep(idx, true);
+    toast('Modo presentación · ← → para avanzar · Esc para salir');
+  }
+  function exit() {
+    if (!present) return;
+    present = false; D.documentElement.classList.remove('dpst-present'); ss.set(null);
+    if (D.fullscreenElement && D.exitFullscreen) D.exitFullscreen().catch(() => {});
+    placePresBtn();
+  }
+  function toggleFull() {
+    if (D.fullscreenElement) { D.exitFullscreen().catch(() => {}); return; }
+    const el = D.documentElement; if (el.requestFullscreen) el.requestFullscreen().catch(() => toast('El navegador no permitió la pantalla completa'));
+  }
+  function visibleSection() {
+    // El módulo abierto de esta diapositiva (o la pestaña visible si no hay desplegable).
+    const s = STEPS[step] || {};
+    if (s.open) { const d = topModules().find(x => x.open); if (d) return d; }
+    return [...D.querySelectorAll('[data-testid="stMain"] [role="tabpanel"]')].find(x => x.offsetParent !== null) || D;
+  }
+  function toggleTables() {
+    const root = visibleSection();
+    const sums = [...root.querySelectorAll('[data-testid="stExpander"] summary')].filter(x => x.offsetParent !== null && /tabla/i.test(x.textContent));
+    if (!sums.length) { toast('No hay tablas desplegables en esta vista'); return; }
+    const anyClosed = sums.some(x => !x.closest('details').open);
+    sums.forEach(x => { if (x.closest('details').open !== anyClosed) x.click(); });
+    toast(anyClosed ? 'Tablas visibles' : 'Tablas ocultas');
+  }
+  function zoomChart() {
+    const vh = P.innerHeight;
+    const charts = [...D.querySelectorAll('[data-testid="stPlotlyChart"]')].filter(c => { const r = c.getBoundingClientRect(); return c.offsetParent !== null && r.bottom > 80 && r.top < vh - 80; });
+    if (!charts.length) { toast('No hay un gráfico visible para ampliar'); return; }
+    const c = charts.sort((a, b) => Math.abs(a.getBoundingClientRect().top - vh * 0.3) - Math.abs(b.getBoundingClientRect().top - vh * 0.3))[0];
+    const wrap = c.closest('[data-testid="stElementContainer"]') || c.parentElement;
+    const btn = wrap && wrap.querySelector('button[aria-label="Fullscreen"], button[aria-label*="ullscreen"], button[title*="ullscreen"]');
+    if (btn) { btn.click(); return; }
+    c.dispatchEvent(new P.MouseEvent('mouseover', { bubbles: true }));
+    setTimeout(() => { const b2 = wrap.querySelector('button[aria-label*="ullscreen"], button[title*="ullscreen"]'); if (b2) b2.click(); else toast('Usa el botón ⤢ del gráfico'); }, 120);
+  }
+  presBtn.addEventListener('click', enter);
+  pbar.addEventListener('click', e => {
+    const b = e.target.closest('[data-p]'); if (!b) return;
+    const a = b.dataset.p;
+    if (a === 'prev') showStep(step - 1, true); else if (a === 'next') showStep(step + 1, true);
+    else if (a === 'exit') exit(); else if (a === 'full') toggleFull(); else if (a === 'tables') toggleTables();
+    else if (a === 'zoom') zoomChart(); else if (a === 'theme') themeBtn.click();
+  });
+  sel.addEventListener('change', () => showStep(Number(sel.value), true));
+  D.addEventListener('keydown', e => {
+    const t = e.target, typing = t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+    if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!present) { if ((e.key === 'p' || e.key === 'P') && D.querySelector('.st-key-dpst_nav')) { e.preventDefault(); enter(); } return; }
+    // Escape primero cierra lo que esté abierto encima (buscador Ctrl+K, ventanas de Streamlit, gráfico ampliado).
+    if (e.key === 'Escape' && (D.querySelector('#dpst-cmd.open') || D.querySelector('[role="dialog"]:not(#dpst-cmd)')
+        || D.querySelector('button[aria-label="Close fullscreen"]'))) return;
+    const k = e.key;
+    if (k === 'ArrowRight' || k === 'PageDown') { e.preventDefault(); showStep(step + 1, true); }
+    else if (k === 'ArrowLeft' || k === 'PageUp') { e.preventDefault(); showStep(step - 1, true); }
+    else if (k === 'Escape') { e.preventDefault(); exit(); }
+    else if (k === 'f' || k === 'F') toggleFull();
+    else if (k === 't' || k === 'T') toggleTables();
+    else if (k === 'g' || k === 'G') zoomChart();
+    else if (k === 'Home') showStep(0, true); else if (k === 'End') showStep(STEPS.length - 1, true);
+  });
+  D.addEventListener('fullscreenchange', () => pbar.classList.toggle('fs', !!D.fullscreenElement));
+  new P.MutationObserver(() => placePresBtn()).observe(D.body, { childList: true });
+  setInterval(placePresBtn, 800);
+  if (ss.get() != null) setTimeout(enter, 900);   // tras recargar la página, sigue en presentación
+  }
+
   /* ---------- carrusel de noticias de Inicio ----------
      Pasa solo cada N segundos (se pausa con el mouse encima, con el foco dentro, con el botón
      de pausa o si la pestaña no se ve). Se puede arrastrar 1:1 con el dedo o el mouse; al soltar
@@ -1949,7 +2139,7 @@ _FX_JS = r"""
 """
 
 
-def apply_ui_fx(items: "list[dict]") -> None:
+def apply_ui_fx(items: "list[dict]", present_steps: "list[dict] | None" = None) -> None:
     """
     Inyecta la capa de interacción. `items` son las entradas de la paleta de comandos:
     dicts con `group`, `label`, `top` (texto exacto de la pestaña del menú superior),
@@ -1957,7 +2147,8 @@ def apply_ui_fx(items: "list[dict]") -> None:
     """
     st.markdown(FX_CSS, unsafe_allow_html=True)
     payload = json.dumps(items, ensure_ascii=False).replace("</", "<\\/")
-    components.html(_FX_JS.replace("__ITEMS__", payload), height=0)
+    steps = json.dumps(present_steps or [], ensure_ascii=False).replace("</", "<\\/")
+    components.html(_FX_JS.replace("__ITEMS__", payload).replace("__STEPS__", steps), height=0)
 
 
 NEWS_AUTOPLAY_MS = 7000  # tiempo que se muestra cada noticia antes de pasar a la siguiente
