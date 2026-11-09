@@ -22,6 +22,7 @@ Formato basado en *Keep a Changelog*. Versiones: `MAYOR.MENOR.PARCHE`.
   límites, ficha del producto, matriz de evolución, anexo con cálculos contrastables), hojas de decisiones del equipo.
 
 ### Cambiado
+- La ventana de ayuda ya no muestra como aviso el cupo diario agotado de Alpha Vantage (fuente opcional de noticias).
 - Alpha Vantage: la clave se lee en cada consulta; el aviso «Falta configuración» desaparece apenas se agrega
   la clave en Secrets, en vez de quedar guardado hasta 3 horas.
 - Los botones flotantes «¿Necesitas ayuda?» e «Ir a… Ctrl K» quedan más pequeños y más arriba, para que no los tape
