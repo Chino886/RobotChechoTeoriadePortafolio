@@ -11,6 +11,8 @@ Se descartan las emisiones de prueba. El símbolo se pasa al formato de Yahoo Fi
 Si el directorio no responde, se usa una lista corta de empresas conocidas.
 """
 import io
+import re
+import unicodedata
 
 import pandas as pd
 import requests
@@ -81,14 +83,29 @@ def fetch_us_tickers(http=requests) -> pd.DataFrame:
     return out.sort_values("ticker").reset_index(drop=True)
 
 
+def _norm(text: str) -> str:
+    """Minúsculas, sin tildes y sin signos: «Coca-Cola» y «coca cola» quedan iguales."""
+    t = unicodedata.normalize("NFD", str(text or "").lower())
+    t = "".join(c for c in t if unicodedata.category(c) != "Mn")
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", t).split())
+
+
 def search(df: pd.DataFrame, text: str, kind: str = "Todos") -> pd.DataFrame:
-    """Busca por nombre de empresa o por ticker (sin distinguir mayúsculas); filtra por tipo."""
+    """
+    Busca por nombre de empresa o por ticker (sin distinguir mayúsculas, tildes ni signos); filtra por tipo.
+    Un nombre coincide si contiene todas las palabras escritas («coca cola» encuentra «Coca-Cola Company»).
+    """
     out = df
     if kind != "Todos":
         out = out[out["tipo"] == kind]
-    q = (text or "").strip().lower()
-    if q:
-        exact = out["ticker"].str.lower() == q
-        hit = out["empresa"].str.lower().str.contains(q, regex=False) | out["ticker"].str.lower().str.startswith(q)
+    raw = (text or "").strip().lower()
+    words = _norm(raw).split()
+    if raw:
+        exact = out["ticker"].str.lower() == raw
+        names = out["empresa"].map(_norm)
+        hit = out["ticker"].str.lower().str.startswith(raw)
+        if words:
+            joined = names.str.replace(" ", "", regex=False)
+            hit = hit | names.map(lambda n: all(w in n for w in words)) | joined.str.contains("".join(words), regex=False)
         out = pd.concat([out[exact], out[hit & ~exact]])
     return out
