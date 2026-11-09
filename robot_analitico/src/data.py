@@ -39,6 +39,9 @@ class AssetData:
     currency: Optional[str] = None
     timezone: Optional[str] = None
     dropped_rows: int = 0
+    # Solo para tipos de cambio (fetch_fx_to_usd): par de Yahoo realmente usado y si se invirtió (1 / tasa).
+    fx_pair: Optional[str] = None
+    fx_inverted: bool = False
 
 
 def _clean_prices(raw: pd.DataFrame) -> "tuple[pd.DataFrame, int]":
@@ -128,6 +131,7 @@ def fetch_fx_to_usd(currency: str, start_date, end_date) -> AssetData:
 
     direct = fetch_asset_data(f"{currency}USD=X", start_date, end_date)
     if direct.ok:
+        direct.fx_pair = f"{currency}USD=X"
         return direct
 
     inverse = fetch_asset_data(f"USD{currency}=X", start_date, end_date)
@@ -142,6 +146,8 @@ def fetch_fx_to_usd(currency: str, start_date, end_date) -> AssetData:
             currency="USD",
             timezone=inverse.timezone,
             dropped_rows=inverse.dropped_rows,
+            fx_pair=f"USD{currency}=X",
+            fx_inverted=True,
         )
 
     return AssetData(

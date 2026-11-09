@@ -178,3 +178,81 @@ def merge_international(local: pd.DataFrame, international: pd.DataFrame, kind: 
     if kind != "Todos":
         extra = extra[extra["tipo"] == kind]
     return pd.concat([local.head(keep_first), extra, local.iloc[keep_first:]], ignore_index=True)
+
+
+# País y moneda de cotización de cada ticker (columnas «País/Bolsa» y «Moneda» de la pestaña Tickers)
+# ---------------------------------------------------------------------------
+# Sufijo de Yahoo → (país, bolsa, moneda de cotización). La moneda es la que Yahoo informa para esa
+# bolsa; al descargar el activo, el bot la vuelve a leer de Yahoo y usa esa (no esta tabla).
+SUFFIX_INFO = {
+    "CL": ("Colombia", "BVC (Bogotá)", "COP"), "SA": ("Brasil", "B3 (São Paulo)", "BRL"),
+    "MX": ("México", "BMV", "MXN"), "SN": ("Chile", "Bolsa de Santiago", "CLP"),
+    "BA": ("Argentina", "BYMA", "ARS"), "LM": ("Perú", "BVL (Lima)", "PEN"),
+    "DE": ("Alemania", "XETRA", "EUR"), "F": ("Alemania", "Fráncfort", "EUR"), "BE": ("Alemania", "Berlín", "EUR"),
+    "MU": ("Alemania", "Múnich", "EUR"), "SG": ("Alemania", "Stuttgart", "EUR"), "HM": ("Alemania", "Hamburgo", "EUR"),
+    "HA": ("Alemania", "Hannover", "EUR"), "DU": ("Alemania", "Düsseldorf", "EUR"),
+    "PA": ("Francia", "Euronext París", "EUR"), "AS": ("Países Bajos", "Euronext Ámsterdam", "EUR"),
+    "MC": ("España", "BME (Madrid)", "EUR"), "MI": ("Italia", "Borsa Italiana", "EUR"),
+    "L": ("Reino Unido", "LSE (Londres)", "GBp"), "SW": ("Suiza", "SIX", "CHF"),
+    "T": ("Japón", "Bolsa de Tokio", "JPY"), "HK": ("Hong Kong", "HKEX", "HKD"),
+    "TO": ("Canadá", "TSX (Toronto)", "CAD"), "AX": ("Australia", "ASX", "AUD"),
+}
+# Códigos de bolsa de Yahoo que son de EE. UU. (tickers sin sufijo)
+US_EXCHANGES = {"NMS": "NASDAQ", "NGM": "NASDAQ", "NCM": "NASDAQ", "NYQ": "NYSE", "ASE": "NYSE American",
+                "PCX": "NYSE Arca", "BTS": "Cboe", "NAS": "NASDAQ"}
+
+# Acciones internacionales comprobadas con una consulta real a Yahoo Finance (precios 2024-01-01 a
+# 2026-11-06 y moneda informada por Yahoo). Se dejaron fuera las que no trajeron datos ese día:
+# PFBCOLOM.CL y BCOLOMBIA.CL (Yahoo: «possibly delisted»). NUTRESA.CL traía datos pero quedó fuera por
+# su OPA y baja negociación (precio poco representativo). Sirven aunque la búsqueda en línea falle.
+VERIFIED_ON = "2026-11-09"
+VERIFIED_INTL = [
+    ("ECOPETROL.CL", "Ecopetrol (acción local)"), ("ISA.CL", "Interconexión Eléctrica ISA"),
+    ("GRUPOSURA.CL", "Grupo Sura"), ("CEMARGOS.CL", "Cementos Argos"), ("GEB.CL", "Grupo Energía Bogotá"),
+    ("PETR4.SA", "Petrobras (preferencial)"), ("VALE3.SA", "Vale"), ("ITUB4.SA", "Itaú Unibanco (preferencial)"),
+    ("WALMEX.MX", "Walmart de México"), ("AMXB.MX", "América Móvil (serie B)"), ("FEMSAUBD.MX", "FEMSA (UBD)"),
+    ("SQM-B.SN", "SQM (serie B)"), ("FALABELLA.SN", "Falabella"), ("CHILE.SN", "Banco de Chile"),
+    ("SAP.DE", "SAP"), ("SIE.DE", "Siemens"), ("MC.PA", "LVMH"), ("AIR.PA", "Airbus"),
+    ("HSBA.L", "HSBC Holdings"), ("SHEL.L", "Shell"), ("7203.T", "Toyota Motor"), ("6758.T", "Sony Group"),
+]
+WORLD_COLUMNS = COLUMNS + ["pais", "pais_bolsa", "moneda", "fuente"]
+
+
+def place_info(symbol: str, exchange: str = "", exch_disp: str = "") -> "tuple[str, str, str]":
+    """(país, bolsa, moneda) según el sufijo del ticker de Yahoo; sin sufijo y bolsa de EE. UU. → USD."""
+    sym = (symbol or "").upper()
+    if "." in sym and not sym.startswith("^"):
+        suf = sym.rsplit(".", 1)[1]
+        if suf in SUFFIX_INFO:
+            return SUFFIX_INFO[suf]
+    if exchange in US_EXCHANGES or ("." not in sym and not exchange):
+        return ("EE. UU.", US_EXCHANGES.get(exchange, exch_disp or "EE. UU."), "USD")
+    if "." in sym:  # sufijo que solo está en la tabla del buscador (SUFFIX_MARKETS): bolsa y moneda de allí
+        suf = sym.rsplit(".", 1)[1]
+        if suf in SUFFIX_MARKETS:
+            name, ccy = SUFFIX_MARKETS[suf]
+            return ("Otro país", name, ccy)
+    return ("Otro", exch_disp or exchange or "N/D", "N/D")
+
+
+def add_place_columns(df: pd.DataFrame, fuente: str) -> pd.DataFrame:
+    """Agrega país, «País/Bolsa» y moneda de cotización a una tabla del directorio."""
+    out = df.copy()
+    if out.empty:
+        return pd.DataFrame(columns=WORLD_COLUMNS)
+    us = out["ticker"].map(lambda t: "." not in str(t) or str(t).rsplit(".", 1)[1] not in SUFFIX_INFO)
+    info = [("EE. UU.", b, "USD") if u else place_info(t) for t, b, u in zip(out["ticker"], out["bolsa"], us)]
+    out["pais"] = [i[0] for i in info]
+    out["pais_bolsa"] = [f"{i[0]} · {i[1]}" for i in info]
+    out["moneda"] = [i[2] for i in info]
+    out["fuente"] = fuente
+    return out[WORLD_COLUMNS]
+
+
+def verified_international() -> pd.DataFrame:
+    """Lista curada de acciones de otras bolsas, comprobada con Yahoo Finance el día VERIFIED_ON."""
+    rows = []
+    for t, name in VERIFIED_INTL:
+        pais, bolsa, moneda = place_info(t)
+        rows.append((t, name, bolsa, "Acción", pais, f"{pais} · {bolsa}", moneda, f"Lista verificada ({VERIFIED_ON})"))
+    return pd.DataFrame(rows, columns=WORLD_COLUMNS)

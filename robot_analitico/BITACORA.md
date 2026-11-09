@@ -38,3 +38,39 @@ Aporte de la IA y herramienta declarada: Claude Code comparó los dos repositori
 Corrección y validación de cada integrante:
 Prueba, comando, resultado, snapshot y commit: `python -m pytest tests/unit/test_portfolio_beta_v2.py` → pasa.
 Revisión cruzada y defensa pendiente: cada integrante reconstruye a mano al menos uno de estos controles.
+
+### VC-02 · 2026-11-09 · Prueba real: acciones fuera de EE. UU. convertidas a USD y COP
+
+ID y fecha: VC-02, 2026-11-09 17:20 UTC.
+Pregunta del banco: conversión de monedas en la comparación (RF-20 ampliado; P_USD = P_COP / (COP por USD) y
+1 + R_USD = (1 + R_COP)(1 + R_FX)).
+Decisión y justificación propias del estudiante:
+Cálculo manual o contraejemplo: consulta real a Yahoo Finance (yfinance), del 2024-01-01 al 2026-11-07, frecuencia semanal,
+con el mismo código de la app (`fetch_many` → `normalize_minor_units` → `fx_to_base` → `build_comparison`).
+Tickers y moneda que informó Yahoo:
+- AAPL: moneda USD, con datos (149 semanas)
+- MSFT: moneda USD, con datos (149 semanas)
+- EC: moneda USD, con datos (149 semanas)
+- ECOPETROL.CL: moneda COP, con datos (149 semanas)
+- GRUPOSURA.CL: moneda COP, con datos (149 semanas)
+- PETR4.SA: moneda BRL, con datos (149 semanas)
+- SAP.DE: moneda EUR, con datos (149 semanas)
+- HSBA.L: moneda GBp, con datos (149 semanas)
+Base USD: ventana común 2024-01-07 a 2026-11-08 (149 semanas); 8 activos válidos, 0 excluidos.
+- ECOPETROL.CL: COP → USD con COPUSD=X; tasa 0.000254639 (2024-01-07) → 0.000308796 (2026-11-08); último precio 2,720.00 → 0.8399 USD
+- GRUPOSURA.CL: COP → USD con COPUSD=X; tasa 0.000254639 (2024-01-07) → 0.000308796 (2026-11-08); último precio 67,500.00 → 20.8438 USD
+- PETR4.SA: BRL → USD con BRLUSD=X; tasa 0.204265 (2024-01-07) → 0.181703 (2026-11-08); último precio 45.30 → 8.2311 USD
+- SAP.DE: EUR → USD con EURUSD=X; tasa 1.09474 (2024-01-07) → 1.12283 (2026-11-08); último precio 210.75 → 236.6356 USD
+- HSBA.L: GBP (de subunidad ÷ 100) → USD con GBPUSD=X; tasa 1.26841 (2024-01-07) → 1.34561 (2026-11-08); último precio 13.05 → 17.5548 USD
+Base COP: ventana común 2024-01-07 a 2026-11-08; 8 activos válidos, 0 excluidos. Los activos en USD usan
+USDCOP=X (COP por 1 USD) y los de BRL, EUR y GBP el cruce (moneda→USD) × USDCOP=X.
+Control de cordura: ECOPETROL.CL a 2.720 COP ≈ 0,84 USD; el ADR EC (15,55 USD) representa 20 acciones locales (≈ 0,78 USD
+por acción), del mismo orden.
+Evidencia adversa y supuesto frágil: ese día Yahoo publicó el par directo COPUSD=X, así que la app lo usó sin invertir
+(la tabla lo dice). Si Yahoo deja de publicarlo, `fetch_fx_to_usd` usa USDCOP=X invertido (probado sin red). HSBA.L cotiza en
+peniques (GBp): se divide entre 100 antes de convertir; sin eso el precio saldría 100 veces más alto. Al verificar la lista de
+acciones internacionales, PFBCOLOM.CL y BCOLOMBIA.CL no trajeron datos (Yahoo: «possibly delisted») y quedaron fuera.
+Aporte de la IA y herramienta declarada: Claude Code corrió la consulta y escribió el registro (ver AI_USAGE, 2026-11-09).
+Corrección y validación de cada integrante:
+Prueba, comando, resultado, snapshot y commit: `python -m pytest tests/unit/test_fx_view_v2.py` → 9 pruebas sin red en verde.
+Revisión cruzada y defensa pendiente: un integrante recalcula a mano un precio convertido (precio original × tasa del último día).

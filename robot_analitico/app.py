@@ -99,12 +99,15 @@ from src.comparison import (
     preselect_non_dominated,
     processed_prices_export,
 )
-from src.data import FREQUENCY_RULES, fetch_asset_data, fetch_fx_to_usd, fetch_many, resample_prices
+from src.data import FREQUENCY_RULES, fetch_asset_data, fetch_many, resample_prices
+from src.fx_view import BASES as FX_BASES, conversion_rows, fx_to_base, human_rate, normalize_minor_units
+from src.data_quality import align_fx_no_lookahead
 from src.market import fetch_quotes
 from ayuda import AYUDA
 from src.connectivity import run_checks
 import src.tickers as _tickers_mod
 from src.tickers import fallback_tickers, fetch_us_tickers, merge_international, search as search_tickers
+from src.tickers import VERIFIED_ON, add_place_columns, verified_international
 from src.trace import git_commit
 from src.risk_extras import expected_shortfall_fraction
 from src.rates import fetch_bond_series, list_long_term_yield_countries, ping_fred, search_bond_series
@@ -1090,6 +1093,43 @@ def render_forecast() -> None:
             )
 
 
+def render_fx_box(result) -> None:
+    """Recuadro «Conversión de monedas»: en qué moneda están los rendimientos y cómo se convirtió cada activo."""
+    fx = st.session_state.get("comparison_fx") or {}
+    base = result.base_currency or "USD"
+    rows = fx.get("rows") or []
+    fx_excluded = [e for e in result.excluded if "tipo de cambio" in (e.reason or "").lower()]
+    st.markdown(
+        f'<div class="fx-base">Precios y rendimientos de esta comparación en <b>{html_escape(base)}</b>'
+        + (f' · {len(rows)} activo(s) convertido(s) desde otra moneda' if rows else ' · ningún activo necesitó conversión')
+        + '</div>', unsafe_allow_html=True)
+    if not rows and not fx_excluded:
+        return
+    with st.container(border=True, key="cmp_fx_box"):
+        st.markdown(f"**Conversión de monedas** a {base}")
+        st.caption(
+            "Cada precio se multiplica por el tipo de cambio de Yahoo Finance publicado ese día o el último antes "
+            "(nunca uno posterior). Ejemplo con pesos: P_USD = P_COP / (COP por USD), y por eso "
+            "1 + R_USD = (1 + R_COP)(1 + R_FX). Si una tasa falta, el activo se excluye: no se inventa ni se rellena.")
+        if rows:
+            table = pd.DataFrame(rows)
+            st.dataframe(
+                table, hide_index=True, use_container_width=True,
+                column_config={
+                    "Tasa primer día": st.column_config.NumberColumn(format="%.6g"),
+                    "Tasa último día": st.column_config.NumberColumn(format="%.6g"),
+                    "Precio original (último día)": st.column_config.NumberColumn(format="%,.2f"),
+                    "Precio convertido (último día)": st.column_config.NumberColumn(format="%,.4f"),
+                })
+            st.caption("«Tasa» = unidades de la moneda base por 1 unidad de la moneda original (columna «Tasa unidad»); "
+                       "«Equivale a» la muestra al revés para leerla fácil. Precio convertido = precio original × tasa "
+                       "del último día.")
+        for note in fx.get("notes") or []:
+            st.caption(note)
+        for e in fx_excluded:
+            st.warning(f"**{e.ticker}** quedó fuera: {e.reason}")
+
+
 def render_comparison() -> None:
     """
     Comparación de N activos, mapa histórico rendimiento-riesgo, dominancia,
@@ -1119,13 +1159,19 @@ def render_comparison() -> None:
     )
 
     st.markdown(section_label_html("Parámetros", "sliders"), unsafe_allow_html=True)
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         start_date = st.date_input("Fecha inicial", value=pd.Timestamp("2023-01-01"), key="comparison_start")
     with col2:
         end_date = st.date_input("Fecha final", value=pd.Timestamp.today(), key="comparison_end")
     with col3:
         frequency = st.selectbox("Frecuencia", list(FREQUENCY_RULES.keys()), key="comparison_frequency")
+    with col4:
+        base = st.selectbox(
+            "Moneda base", list(FX_BASES), key="comparison_base",
+            help="En qué moneda se comparan todos los activos (como en el Laboratorio). Los que coticen en otra moneda "
+                 "(por ejemplo ECOPETROL.CL en COP o PETR4.SA en BRL) se convierten con el tipo de cambio de Yahoo "
+                 "Finance de cada fecha: P_USD = P_COP / (COP por USD).")
 
     if st.button("Comparar activos"):
         raw_tickers = [
@@ -1149,37 +1195,45 @@ def render_comparison() -> None:
                     status_set(st.session_state, "yahoo_hist", status_classify(
                         "; ".join(str(getattr(a, "error", "")) for a in assets.values())), "comparación sin datos")
 
-                # Conversión de monedas (RF-20 ampliado): se descarga el tipo
-                # de cambio de cada moneda distinta a USD presente entre los
-                # activos válidos, para poder compararlos a todos en USD.
+                # Conversión de monedas (RF-20 ampliado): se descarga el tipo de cambio de cada moneda distinta
+                # a la base presente entre los activos válidos (src.fx_view reutiliza fetch_fx_to_usd y la
+                # alineación sin look-ahead). Las subunidades (GBp = peniques) se pasan antes a su moneda.
+                fx_notes = {}
+                for t, a in list(assets.items()):
+                    if getattr(a, "ok", False):
+                        assets[t], note = normalize_minor_units(a)
+                        if note:
+                            fx_notes[t] = note
                 currencies_needed = {
                     (a.currency or "").upper()
                     for a in assets.values()
-                    if getattr(a, "ok", False) and a.currency and a.currency.upper() != "USD"
+                    if getattr(a, "ok", False) and a.currency and a.currency.upper() != base
                 }
-                fx_rates = {}
-                fx_errors = []
-                for currency in currencies_needed:
-                    fx_result = fetch_fx_to_usd(currency, start_date, end_date)
-                    # Diagnóstico técnico del tipo de cambio: al registro, no a la pantalla.
-                    status_log.info("FX %s: ok=%s ticker=%s error=%s n=%s rango=%s", currency, fx_result.ok,
-                                    fx_result.ticker, fx_result.error,
-                                    0 if fx_result.prices is None else len(fx_result.prices),
-                                    None if fx_result.prices is None or fx_result.prices.empty else
-                                    (fx_result.prices.index.min(), fx_result.prices.index.max()))
-                    if fx_result.ok and fx_result.prices is not None:
-                        fx_result.prices = resample_prices(fx_result.prices, frequency)
-                        fx_rates[currency] = fx_result.prices["adjusted_close"]
+                fx_rates, fx_errors, fx_legs = {}, [], {}
+                consulted = status_now()
+                for currency in sorted(currencies_needed):
+                    leg = fx_to_base(currency, base, start_date, end_date, now=consulted)
+                    # Diagnóstico técnico del tipo de cambio: también queda en el registro.
+                    status_log.info("FX %s->%s: ok=%s par=%s error=%s n=%s", currency, base, leg.ok, leg.pairs,
+                                    leg.error, len(leg.series))
+                    if leg.ok:
+                        resampled = resample_prices(pd.DataFrame({"adjusted_close": leg.series}), frequency)
+                        leg.series = resampled["adjusted_close"]  # la misma serie que usa la comparación
+                        fx_rates[currency] = leg.series
+                        fx_legs[currency] = leg
                     else:
-                        fx_errors.append(f"{currency}->USD: {fx_result.error or 'sin datos'}")
+                        fx_errors.append(f"{currency}->{base}: {leg.error or 'sin datos'}")
 
                 periods_per_year = FREQUENCY_PERIODS_PER_YEAR.get(frequency, 252)
-                result = build_comparison(assets, frequency, periods_per_year, fx_rates=fx_rates)
+                result = build_comparison(assets, frequency, periods_per_year, base_currency=base, fx_rates=fx_rates)
+                st.session_state["comparison_fx"] = {
+                    "rows": conversion_rows(result, assets, fx_legs, fx_notes) if result.ok else [],
+                    "notes": list(fx_notes.values()), "errors": fx_errors, "base": base}
             if fx_errors:
                 show_status_error(
                     "Preselección · Comparación", "No se pudo obtener el tipo de cambio de algunas monedas",
-                    "Tipo de cambio a USD de: " + ", ".join(e.split("->")[0] for e in fx_errors),
-                    "Los activos en esas monedas quedan excluidos. Puedes comparar solo activos en USD o volver a intentar.",
+                    f"Tipo de cambio a {base} de: " + ", ".join(e.split("->")[0] for e in fx_errors),
+                    f"Los activos en esas monedas quedan excluidos. Puedes comparar solo activos en {base} o volver a intentar.",
                     "; ".join(fx_errors), tone="warn")
             st.session_state["comparison_result"] = result
 
@@ -1207,6 +1261,7 @@ def render_comparison() -> None:
     else:
         st.success(f"{n_valid} activos válidos comparados (mínimo exigido: {MIN_COMPARISON_ASSETS}).")
 
+    render_fx_box(result)
     st.caption(
         f"Moneda base: {result.base_currency} · Frecuencia: {result.frequency} · "
         f"Ventana común: {result.common_start.date()} a {result.common_end.date()} "
@@ -2384,7 +2439,8 @@ def _ticker_names() -> "dict[str, str]":
     """Nombre de cada ticker según el directorio de la pestaña Tickers (si no está, se deja sin nombre)."""
     try:
         directory, _complete = _ticker_directory()
-        return dict(zip(directory["ticker"], directory["empresa"]))
+        intl = verified_international()
+        return {**dict(zip(intl["ticker"], intl["empresa"])), **dict(zip(directory["ticker"], directory["empresa"]))}
     except Exception:
         return {}
 
@@ -2396,10 +2452,17 @@ def _fav_button(ticker: str, name: str) -> str:
             f'{icon("star", 14)}</button>')
 
 
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def _us_directory_with_place(directory: pd.DataFrame) -> pd.DataFrame:
+    return add_place_columns(directory, "NASDAQ Trader")
+
+
 def _tickers_table_html(rows: pd.DataFrame, selected: "str | None") -> str:
-    """Tabla del screener: mismas columnas y datos de la búsqueda (ticker, empresa, bolsa, tipo)."""
+    """Tabla del screener: ticker, empresa, país/bolsa, moneda de cotización y tipo."""
     body = []
-    for i, (t, e, b, k) in enumerate(zip(rows["ticker"], rows["empresa"], rows["bolsa"], rows["tipo"])):
+    place = rows["pais_bolsa"] if "pais_bolsa" in rows else rows["bolsa"]
+    money = rows["moneda"] if "moneda" in rows else pd.Series(["USD"] * len(rows), index=rows.index)
+    for i, (t, e, b, k, m) in enumerate(zip(rows["ticker"], rows["empresa"], place, rows["tipo"], money)):
         cls, ic = _TYPE_STYLE.get(k, ("other", "tag"))
         on = ' class="on" aria-selected="true"' if t == selected else ""
         delay = f' style="animation-delay:{min(i, 24) * 0.018:.3f}s"'
@@ -2408,10 +2471,12 @@ def _tickers_table_html(rows: pd.DataFrame, selected: "str | None") -> str:
             f'<td class="tk">{_ticker_avatar(t)}<b>{html_escape(t)}</b>{_fav_button(t, e)}</td>'
             f'<td class="em">{html_escape(e)}</td>'
             f'<td><span class="tk-ex">{html_escape(b)}</span></td>'
+            f'<td><b>{html_escape(str(m))}</b></td>'
             f'<td><span class="tk-type {cls}">{icon(ic, 13)}{html_escape(k)}</span></td></tr>'
         )
     head = ('<thead><tr><th class="n">#</th><th data-sort="1">Ticker</th><th data-sort="2">Empresa</th>'
-            '<th data-sort="3">Bolsa</th><th data-sort="4">Tipo</th></tr></thead>')
+            '<th data-sort="3">País/Bolsa</th><th data-sort="4">Moneda de cotización</th><th data-sort="5">Tipo</th>'
+            '</tr></thead>')
     return f'<div class="tk-table" role="region" aria-label="Resultados de la búsqueda"><table>{head}<tbody>{"".join(body)}</tbody></table></div>'
 
 
@@ -2449,17 +2514,20 @@ def render_tickers_page() -> None:
     status_set(st.session_state, "nasdaq", "ok" if complete else "nodata",
                f"{len(directory):,} empresas y fondos" if complete else "se usó la lista corta de respaldo")
 
+    us_dir = _us_directory_with_place(directory)
+    combined = pd.concat([us_dir, verified_international()], ignore_index=True).drop_duplicates("ticker")
+
     left, main = st.columns([1, 2.6], gap="medium")
     with left:
         with st.container(key="tk_left"):
             st.markdown(section_label_html("Buscar", "search"), unsafe_allow_html=True)
-            text = st.text_input("Escribe el nombre de la empresa o su ticker", placeholder="Ej: coca cola, apple, tesla",
+            text = st.text_input("Escribe el nombre de la empresa o su ticker", placeholder="Ej: coca cola, apple, ecopetrol",
                                  key="ticker_search")
             st.markdown(section_label_html("Filtros", "sliders"), unsafe_allow_html=True)
             kind = st.selectbox("Tipo", ["Todos", "Acción", "Fondo (ETF)"], key="ticker_kind", help=(
                 "- **Acción:** una parte de una empresa.\n- **Fondo (ETF):** una canasta de muchas acciones que se "
                 "compra como si fuera una sola."))
-            found = search_tickers(directory, text, kind)
+            found = search_tickers(combined, text, kind)
             query = (text or "").strip()
             intl, intl_error = (None, None)
             if len(query) >= 2:  # otras bolsas: buscador de Yahoo Finance (una consulta por búsqueda, guardada 1 h)
@@ -2471,7 +2539,16 @@ def render_tickers_page() -> None:
                 else:
                     status_set(st.session_state, "yahoo_search", "ok" if len(intl) else "nodata",
                                f"«{query}»: {len(intl)} resultado(s) en todas las bolsas")
-                found = merge_international(found, intl, kind)
+                found = merge_international(found, add_place_columns(intl, "Buscador de Yahoo Finance"), kind)
+            # Filtro por país o por moneda de cotización (columnas «País/Bolsa» y «Moneda»).
+            places = ["Todos"] + [f"País: {p}" for p in sorted(found["pais"].dropna().unique())] \
+                + [f"Moneda: {m}" for m in sorted(found["moneda"].dropna().unique())]
+            place = st.selectbox("País o moneda", places, key="ticker_place",
+                                 help="Muestra solo las empresas de un país o las que cotizan en una moneda.")
+            if place.startswith("País: "):
+                found = found[found["pais"] == place[6:]]
+            elif place.startswith("Moneda: "):
+                found = found[found["moneda"] == place[8:]]
             chips = []
             if (text or "").strip():
                 chips.append(f'{icon("search", 12)}«{html_escape(text.strip())}»')
@@ -2483,19 +2560,23 @@ def render_tickers_page() -> None:
                    + "".join(f'<span class="chip">{c}</span>' for c in chips) + "</div>" if chips
                    else '<div class="tk-chips"><span class="lab">Sin filtros: todo el directorio</span></div>')
                 + "</div>", unsafe_allow_html=True)
+            st.caption("**ADR y acción local:** EC (Ecopetrol en la bolsa de Nueva York) cotiza en **USD**; "
+                       "ECOPETROL.CL (Ecopetrol en Bogotá) cotiza en **COP**. Son la misma empresa en dos bolsas y dos "
+                       "monedas.")
             if complete:
                 st.caption(f"{len(directory):,} empresas y fondos de las bolsas de Estados Unidos (directorio público de "
-                           "NASDAQ Trader, se actualiza cada día).")
+                           f"NASDAQ Trader, se actualiza cada día) + {len(verified_international())} acciones de otras "
+                           f"bolsas verificadas en Yahoo Finance el {VERIFIED_ON}.")
             if len(query) >= 2:
                 n_intl = 0 if intl is None else int((~intl["ticker"].isin(set(directory["ticker"]))).sum())
                 if intl_error:
-                    st.caption("No se pudo buscar en otras bolsas en este momento (Yahoo Finance); se muestran solo las de "
-                               "EE. UU. Vuelve a intentar en un rato.")
+                    st.caption("No se pudo buscar en otras bolsas en este momento (Yahoo Finance); se muestran las de "
+                               "EE. UU. y la lista de acciones internacionales verificadas. Vuelve a intentar en un rato.")
                 else:
                     st.caption(f"Otras bolsas (Yahoo Finance): {n_intl} resultado(s) de fuera de EE. UU. — por ejemplo "
                                "«.CL» Colombia, «.MX» México, «.SA» Brasil, «.DE» Alemania. Su moneda aparece en la "
-                               "columna Bolsa; la Comparación la convierte a la moneda base.")
-            else:
+                               "columna Moneda de cotización; la Comparación la convierte a la moneda base.")
+            if not complete:
                 show_status_error("Tickers", "No se pudo cargar el directorio completo",
                                   "Directorio de NASDAQ Trader (todas las empresas)",
                                   "Puedes seguir con la lista corta de empresas conocidas o volver más tarde.", tone="warn")
@@ -3232,8 +3313,67 @@ def render_asset_data() -> None:
                 f"Se descartaron {result.dropped_rows} filas inválidas "
                 "(faltantes o precios no positivos)."
             )
+        render_asset_fx(result)
         with st.expander("Ver últimos 20 datos"):
             st.dataframe(result.prices.tail(20))
+
+
+def render_asset_fx(result) -> None:
+    """
+    Moneda original del activo y, si no es USD, un interruptor para ver también el precio en USD con
+    el mismo tipo de cambio y la misma alineación por fecha (sin look-ahead) que usa la Comparación.
+    Solo es vista: el análisis histórico y el pronóstico siguen con el precio original.
+    """
+    raw_ccy = (result.currency or "").strip()
+    if not raw_ccy:
+        st.caption("Moneda de cotización: N/D (Yahoo Finance no la informó); no se puede convertir a USD.")
+        return
+    if raw_ccy.upper() == "USD":
+        st.markdown('<div class="fx-base">Moneda de cotización: <b>USD</b> · no necesita conversión</div>',
+                    unsafe_allow_html=True)
+        return
+    norm, note = normalize_minor_units(result)
+    ccy = norm.currency.upper()
+    st.markdown(f'<div class="fx-base">Moneda de cotización: <b>{html_escape(raw_ccy)}</b> · el análisis de abajo '
+                f'usa el precio en {html_escape(raw_ccy)}</div>', unsafe_allow_html=True)
+    if not st.toggle("Ver el precio también en USD", key="asset_show_usd",
+                     help="Convierte cada precio con el tipo de cambio de Yahoo Finance de esa fecha (o el último "
+                          "publicado antes; nunca uno posterior). No cambia el análisis, solo lo muestra en dólares."):
+        return
+    prices = norm.prices["adjusted_close"]
+    key = (result.ticker, str(prices.index.min()), str(prices.index.max()), st.session_state.get("asset_frequency"))
+    cached = st.session_state.get("asset_fx")
+    if not cached or cached.get("key") != key:
+        with status_loading("chart", f"Consultando el tipo de cambio {ccy} → USD…", "yahoo_hist"):
+            leg = fx_to_base(ccy, "USD", prices.index.min().date(), prices.index.max().date() + pd.Timedelta(days=1),
+                             now=status_now())
+        if leg.ok:
+            freq = st.session_state.get("asset_frequency")
+            leg.series = resample_prices(pd.DataFrame({"adjusted_close": leg.series}), freq)["adjusted_close"]
+        cached = {"key": key, "leg": leg}
+        st.session_state["asset_fx"] = cached
+    leg = cached["leg"]
+    if not leg.ok:
+        st.warning(f"No se pudo convertir a USD: {leg.error}. No se inventa ni se rellena la tasa.")
+        return
+    local = prices.copy()
+    if local.index.tz is not None:
+        local.index = local.index.tz_localize(None)
+    fx = align_fx_no_lookahead(local.index, leg.series)
+    view = pd.DataFrame({f"Precio ({ccy})": local, "Tasa (USD por 1 " + ccy + ")": fx, "Precio (USD)": local * fx})
+    missing = int(fx.isna().sum())
+    view = view.dropna()
+    last = view.iloc[-1]
+    c1, c2, c3 = st.columns(3)
+    c1.metric(f"Último precio ({ccy})", f"{last.iloc[0]:,.2f}")
+    c2.metric("Tipo de cambio usado", human_rate(float(last.iloc[1]), ccy, "USD"))
+    c3.metric("Último precio (USD)", f"{last.iloc[2]:,.4f}")
+    st.line_chart(view["Precio (USD)"], height=220)
+    st.caption(f"Par: {leg.pairs} · consulta: {leg.fetched_at} · P_USD = P_{ccy} × (USD por 1 {ccy})"
+               + (f" · {missing} fecha(s) sin tasa previa quedan fuera" if missing else "")
+               + (f" · {note}" if note else ""))
+    with st.expander("Ver últimos 20 datos convertidos"):
+        st.dataframe(view.tail(20))
 
 
 # Módulos de Preselección: título del desplegable, ícono (Material) e ícono del panel de estado.

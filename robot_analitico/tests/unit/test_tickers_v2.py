@@ -59,6 +59,9 @@ def test_simple_interface_tickers_tab_news_home_and_tooltips(monkeypatch):
     import streamlit as st
 
     monkeypatch.setattr(src.tickers.requests, "get", _Http().get)
+    # Búsqueda en otras bolsas sin red: Yahoo «responde» un resultado colombiano simulado.
+    monkeypatch.setattr(src.tickers, "yahoo_search", lambda text, **kw: src.tickers.parse_yahoo_search(
+        [{"symbol": "KOF.MX", "quoteType": "EQUITY", "exchDisp": "Mexico", "shortname": "Coca-Cola FEMSA"}]))
     st.cache_data.clear()  # otra prueba pudo dejar en caché el directorio real (en CI hay red)
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=180)
     at.session_state["intro_ack"] = True

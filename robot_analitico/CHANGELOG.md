@@ -5,6 +5,12 @@ Formato basado en *Keep a Changelog*. Versiones: `MAYOR.MENOR.PARCHE`.
 ## [2.0.0] — 2026-11-06 (entrega final)
 
 ### Agregado
+- Tickers: columnas «País/Bolsa» y «Moneda de cotización», filtro por país o moneda, nota de ADR vs. acción local y
+  una lista de 22 acciones internacionales verificadas el 2026-11-09 (se suma a la búsqueda en otras bolsas).
+- Comparación: selector de moneda base (USD o COP) y recuadro «Conversión de monedas» con el par usado, la tasa del
+  primer y último día, la hora de consulta y el precio original vs. convertido de cada activo.
+- Datos del activo: moneda original e interruptor «Ver el precio también en USD» (mismo tipo de cambio y alineación).
+- Las cotizaciones en peniques (GBp, Londres) se pasan a libras antes de convertir.
 - Botón flotante «¿Necesitas ayuda?» (abajo a la derecha, encima de «Ir a… Ctrl K»): dice en qué sección y módulo
   estás, qué puedes hacer ahí, el siguiente paso de uso según lo que ya hiciste (y los avisos del Centro de estados),
   preguntas frecuentes, glosario y acceso al buscador. Sin IA ni servicios externos; se oculta en Modo presentación.
@@ -22,6 +28,8 @@ Formato basado en *Keep a Changelog*. Versiones: `MAYOR.MENOR.PARCHE`.
   límites, ficha del producto, matriz de evolución, anexo con cálculos contrastables), hojas de decisiones del equipo.
 
 ### Cambiado
+- DPST Insights: «Compara AAPL y MSFT» respeta el orden escrito (antes podía salir «MSFT vs AAPL» al azar).
+- Tickers: el aviso «No se pudo cargar el directorio completo» solo sale cuando de verdad falla el directorio.
 - Tickers: la búsqueda ignora guiones, tildes y mayúsculas («coca cola» encuentra Coca-Cola) y, si el directorio de
   NASDAQ Trader falla, se reintenta a los 10 minutos en lugar de dejar la lista corta fija por 24 horas.
 - La ventana de ayuda ya no muestra como aviso el cupo diario agotado de Alpha Vantage (fuente opcional de noticias).

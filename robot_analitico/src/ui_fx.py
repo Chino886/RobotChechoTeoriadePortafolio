@@ -592,6 +592,10 @@ html { font-optical-sizing: auto; }
     background: no-repeat 0.8rem 50% / 17px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2334C9A0' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") !important;
 }
 .st-key-ticker_search [data-baseweb="input"] { min-height: 46px; }
+/* Comparación y Datos del activo: moneda en que están los precios y rendimientos. */
+.fx-base { margin: 0.4rem 0 0.6rem; padding: 0.55rem 0.85rem; border-radius: 10px; font-size: 0.9rem; color: var(--dp-ink);
+    background: rgba(var(--dp-accent-rgb), 0.08); border-left: 3px solid var(--dp-accent); }
+.fx-base b { color: var(--dp-ink); }
 .tk-count { margin: 0.9rem 0 0.4rem; padding: 0.9rem 1rem; border-radius: 14px; border: 1px solid rgba(var(--dp-accent-rgb), 0.22);
     background: linear-gradient(180deg, rgba(var(--dp-accent-rgb), 0.10), rgba(var(--dp-accent-rgb), 0.03)); }
 .tk-count .v { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 1.7rem; color: var(--dp-ink); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }

@@ -39,8 +39,9 @@ def mentioned_tickers(question: str, asset: Optional[dict], comparison: Optional
         known.add(asset["ticker"].upper())
     if comparison:
         known |= {r["ticker"].upper() for r in comparison["rows"]}
-    words = set(re.findall(r"[A-Za-z0-9^][A-Za-z0-9.\-^=]*", question or ""))
-    return [w.upper() for w in words if w.upper() in known]
+    words = re.findall(r"[A-Za-z0-9^][A-Za-z0-9.\-^=]*", question or "")
+    # En el orden en que se escribieron («Compara AAPL y MSFT» → AAPL vs MSFT), sin repetir.
+    return list(dict.fromkeys(w.upper() for w in words if w.upper() in known))
 
 
 # ---------------------------------------------------------------------------
