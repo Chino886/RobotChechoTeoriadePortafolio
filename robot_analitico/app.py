@@ -105,8 +105,9 @@ from src.data_quality import align_fx_no_lookahead
 from src.market import fetch_quotes
 from ayuda import AYUDA
 from src.connectivity import run_checks
-from src.tickers import fallback_tickers, fetch_us_tickers, search as search_tickers
-from src.tickers import VERIFIED_ON, add_place_columns, search_world, verified_international
+import src.tickers as _tickers_mod
+from src.tickers import fallback_tickers, fetch_us_tickers, merge_international, search as search_tickers
+from src.tickers import VERIFIED_ON, add_place_columns, verified_international
 from src.trace import git_commit
 from src.risk_extras import expected_shortfall_fraction
 from src.rates import fetch_bond_series, list_long_term_yield_countries, ping_fred, search_bond_series
@@ -2405,6 +2406,20 @@ def _ticker_directory() -> "tuple[pd.DataFrame, bool]":
         return fallback_tickers(), False
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _yahoo_ticker_search_cached(query: str) -> pd.DataFrame:
+    """Se guarda 1 h solo si responde: si falla lanza la excepción y Streamlit no guarda el fallo."""
+    return _tickers_mod.yahoo_search(query)
+
+
+def _yahoo_ticker_search(query: str) -> "tuple[pd.DataFrame, str | None]":
+    """Empresas de todas las bolsas según el buscador de Yahoo Finance. Devuelve (resultados, error)."""
+    try:
+        return _yahoo_ticker_search_cached(query), None
+    except Exception as exc:  # noqa: BLE001 — se muestra un aviso claro y el detalle va al registro
+        return pd.DataFrame(columns=["ticker", "empresa", "bolsa", "tipo"]), f"{type(exc).__name__}: {exc}"
+
+
 def _use_ticker(ticker: str) -> None:
     st.session_state["asset_ticker"] = ticker
     st.session_state["ticker_chosen_msg"] = ticker
@@ -2435,20 +2450,6 @@ def _fav_button(ticker: str, name: str) -> str:
     return (f'<button type="button" class="dash-fav" data-fav="{html_escape(ticker)}" data-fav-name="{html_escape(name)}" '
             f'aria-pressed="false" title="Marcar como favorito" aria-label="Marcar {html_escape(ticker)} como favorito">'
             f'{icon("star", 14)}</button>')
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def _world_search_cached(text: str) -> pd.DataFrame:
-    return search_world(text)
-
-
-def _world_search(text: str) -> "tuple[pd.DataFrame, str | None]":
-    """Búsqueda en todas las bolsas (Yahoo Finance). Si falla no se guarda en caché y se informa el motivo."""
-    try:
-        return _world_search_cached(text), None
-    except Exception as exc:
-        return pd.DataFrame(columns=["ticker", "empresa", "bolsa", "tipo", "pais", "pais_bolsa", "moneda", "fuente"]), \
-            str(exc)[:80] or "sin respuesta"
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
@@ -2522,22 +2523,24 @@ def render_tickers_page() -> None:
             st.markdown(section_label_html("Buscar", "search"), unsafe_allow_html=True)
             text = st.text_input("Escribe el nombre de la empresa o su ticker", placeholder="Ej: coca cola, apple, ecopetrol",
                                  key="ticker_search")
-            world = st.toggle("Buscar también en otras bolsas del mundo", value=True, key="ticker_world", help=(
-                "Además de las bolsas de EE. UU., busca por nombre en Yahoo Finance: Colombia (.CL), Brasil (.SA), "
-                "México (.MX), Chile (.SN), Europa (.DE, .PA, .L…) y Asia (.T…). Los activos en otra moneda se "
-                "convierten a USD o COP en la Comparación."))
             st.markdown(section_label_html("Filtros", "sliders"), unsafe_allow_html=True)
             kind = st.selectbox("Tipo", ["Todos", "Acción", "Fondo (ETF)"], key="ticker_kind", help=(
                 "- **Acción:** una parte de una empresa.\n- **Fondo (ETF):** una canasta de muchas acciones que se "
                 "compra como si fuera una sola."))
             found = search_tickers(combined, text, kind)
-            world_error = None
-            if world and (text or "").strip():
-                extra, world_error = _world_search(text.strip())
-                if not extra.empty:
-                    if kind != "Todos":
-                        extra = extra[extra["tipo"] == kind]
-                    found = pd.concat([found, extra[~extra["ticker"].isin(found["ticker"])]], ignore_index=True)
+            query = (text or "").strip()
+            intl, intl_error = (None, None)
+            if len(query) >= 2:  # otras bolsas: buscador de Yahoo Finance (una consulta por búsqueda, guardada 1 h)
+                with status_loading("table", f"Buscando «{query}» en otras bolsas (Yahoo Finance)…", "yahoo_search"):
+                    intl, intl_error = _yahoo_ticker_search(query)
+                if intl_error:
+                    status_set(st.session_state, "yahoo_search", status_classify(intl_error), intl_error)
+                    status_log.warning("[Tickers] búsqueda en Yahoo falló | %s", intl_error)
+                else:
+                    status_set(st.session_state, "yahoo_search", "ok" if len(intl) else "nodata",
+                               f"«{query}»: {len(intl)} resultado(s) en todas las bolsas")
+                found = merge_international(found, add_place_columns(intl, "Buscador de Yahoo Finance"), kind)
+            # Filtro por país o por moneda de cotización (columnas «País/Bolsa» y «Moneda»).
             places = ["Todos"] + [f"País: {p}" for p in sorted(found["pais"].dropna().unique())] \
                 + [f"Moneda: {m}" for m in sorted(found["moneda"].dropna().unique())]
             place = st.selectbox("País o moneda", places, key="ticker_place",
@@ -2557,9 +2560,6 @@ def render_tickers_page() -> None:
                    + "".join(f'<span class="chip">{c}</span>' for c in chips) + "</div>" if chips
                    else '<div class="tk-chips"><span class="lab">Sin filtros: todo el directorio</span></div>')
                 + "</div>", unsafe_allow_html=True)
-            if world_error:
-                st.caption(f"La búsqueda en otras bolsas no respondió ahora ({world_error}); se muestran EE. UU. y la "
-                           "lista de acciones internacionales verificadas.")
             st.caption("**ADR y acción local:** EC (Ecopetrol en la bolsa de Nueva York) cotiza en **USD**; "
                        "ECOPETROL.CL (Ecopetrol en Bogotá) cotiza en **COP**. Son la misma empresa en dos bolsas y dos "
                        "monedas.")
@@ -2567,7 +2567,16 @@ def render_tickers_page() -> None:
                 st.caption(f"{len(directory):,} empresas y fondos de las bolsas de Estados Unidos (directorio público de "
                            f"NASDAQ Trader, se actualiza cada día) + {len(verified_international())} acciones de otras "
                            f"bolsas verificadas en Yahoo Finance el {VERIFIED_ON}.")
-            else:
+            if len(query) >= 2:
+                n_intl = 0 if intl is None else int((~intl["ticker"].isin(set(directory["ticker"]))).sum())
+                if intl_error:
+                    st.caption("No se pudo buscar en otras bolsas en este momento (Yahoo Finance); se muestran las de "
+                               "EE. UU. y la lista de acciones internacionales verificadas. Vuelve a intentar en un rato.")
+                else:
+                    st.caption(f"Otras bolsas (Yahoo Finance): {n_intl} resultado(s) de fuera de EE. UU. — por ejemplo "
+                               "«.CL» Colombia, «.MX» México, «.SA» Brasil, «.DE» Alemania. Su moneda aparece en la "
+                               "columna Moneda de cotización; la Comparación la convierte a la moneda base.")
+            if not complete:
                 show_status_error("Tickers", "No se pudo cargar el directorio completo",
                                   "Directorio de NASDAQ Trader (todas las empresas)",
                                   "Puedes seguir con la lista corta de empresas conocidas o volver más tarde.", tone="warn")
@@ -2622,12 +2631,22 @@ def _insights_inputs():
         result, prices, freq, stats, dd = a
         asset = {"ticker": result.ticker, "freq": freq or "Diaria", "n": stats.n, "mean": stats.mean_annualized,
                  "vol": stats.std_annualized, "dd": dd, "start": str(prices.index.min().date()),
-                 "end": str(prices.index.max().date())}
+                 "end": str(prices.index.max().date()), "mean_pp": stats.mean, "median": stats.median,
+                 "std": stats.std, "min": stats.minimum, "max": stats.maximum, "skew": stats.skewness,
+                 "kurt": stats.excess_kurtosis, "pctl_last": stats.last_return_percentile}
+        try:  # la misma ventana reciente de Descriptivos (misma función, mismos datos)
+            recent, partial = recent_window_stats(log_returns(prices),
+                                                  FREQUENCY_PERIODS_PER_YEAR.get(freq, 252))
+            asset.update(recent_vol=recent.std_annualized, recent_mean=recent.mean_annualized, n_recent=recent.n,
+                         partial=partial)
+        except Exception:  # noqa: BLE001 — sin ventana reciente, el análisis usa solo la muestra completa
+            pass
     comparison = None
     cmp_ = st.session_state.get("comparison_result")
     if cmp_ is not None and getattr(cmp_, "ok", False) and cmp_.summaries:
-        comparison = {"rows": [{"ticker": s.ticker, "mean": s.mean_annual, "vol": s.vol_annual, "rvr": s.rvr}
-                               for s in cmp_.summaries],
+        comparison = {"rows": [{"ticker": s.ticker, "mean": s.mean_annual, "vol": s.vol_annual, "rvr": s.rvr,
+                                "dd": s.max_dd, "q05": s.q05, "q95": s.q95, "n": s.n} for s in cmp_.summaries],
+                      "nd": set(non_dominated_tickers(cmp_.summaries)),
                       "window": f"{cmp_.common_start.date()} a {cmp_.common_end.date()}",
                       "currency": cmp_.base_currency or ""}
     return asset, comparison, st.session_state.get(INSIGHTS_CTX_KEY) or {}
@@ -2641,7 +2660,9 @@ def _ask_insight(question: str) -> None:
     opts = context_options(asset, comparison, ctx)
     chosen = st.session_state.get("insights_sel")
     selected = next((o for o in opts if o[1] == chosen), None)
-    ans = insight_answer(question, asset, comparison, ctx, selected)
+    history = st.session_state.get(INSIGHTS_HISTORY_KEY) or []
+    previous = history[-1]["a"].get("topic") if history else None
+    ans = insight_answer(question, asset, comparison, ctx, selected, previous_topic=previous)
     st.session_state.setdefault(INSIGHTS_HISTORY_KEY, []).append({
         "q": question, "sel": selected[1] if selected else None, "a": asdict(ans),
         "ts": pd.Timestamp.now(tz="UTC").strftime("%H:%M UTC")})
@@ -2704,6 +2725,12 @@ def render_insights_page() -> None:
                     with st.chat_message("assistant", avatar=":material/smart_toy:"):
                         st.markdown(insight_answer_html(item["a"], icon), unsafe_allow_html=True)
                         st.caption(item["ts"])
+                        if item is history[-1] and item["a"].get("followups"):
+                            st.caption("Para profundizar:")
+                            cols = st.columns(len(item["a"]["followups"]))
+                            for j, (col, fq) in enumerate(zip(cols, item["a"]["followups"])):
+                                col.button(fq, key=f"ins_fu_{len(history)}_{j}", on_click=_ask_insight, args=(fq,),
+                                           use_container_width=True)
             prompt = st.chat_input("Escribe tu pregunta (ej.: ¿qué significa esta volatilidad y cómo la interpreto?)",
                                    key="ins_input")
             if prompt:

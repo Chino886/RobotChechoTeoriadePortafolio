@@ -21,7 +21,7 @@ import src.fx_view as fx_view  # noqa: E402
 from src.comparison import build_comparison  # noqa: E402
 from src.data import AssetData, fetch_fx_to_usd  # noqa: E402
 from src.fx_view import conversion_rows, fx_to_base, normalize_minor_units, rate_on, returns_identity  # noqa: E402
-from src.tickers import parse_world_quotes, place_info, search_world, verified_international  # noqa: E402
+from src.tickers import add_place_columns, place_info, verified_international, yahoo_search  # noqa: E402
 
 DAYS = pd.date_range("2025-01-06", periods=6, freq="B")
 COP_PRICES = [2400.0, 2450.0, 2430.0, 2500.0, 2520.0, 2480.0]
@@ -104,13 +104,13 @@ def test_world_search_returns_cl_results_with_currency():
               {"symbol": "ECOPETROL.CL", "quoteType": "EQUITY", "exchange": "BVC", "exchDisp": "BVC", "shortname": "ECOPETROL SA"},
               {"symbol": "E1CO34.SA", "quoteType": "EQUITY", "exchange": "SAO", "shortname": "ECOPETROL SADRN"},
               {"symbol": "XX", "quoteType": "OPTION", "exchange": "NYQ"}]
-    df = search_world("ecopetrol", searcher=lambda q: quotes).set_index("ticker")
+    df = add_place_columns(yahoo_search("ecopetrol", searcher=lambda q: quotes), "Buscador").set_index("ticker")
     assert list(df.index) == ["EC", "ECOPETROL.CL", "E1CO34.SA"]  # la opción se descarta
     assert df.loc["ECOPETROL.CL", "moneda"] == "COP" and df.loc["ECOPETROL.CL", "pais"] == "Colombia"
-    assert df.loc["EC", "moneda"] == "USD" and df.loc["EC", "pais_bolsa"] == "EE. UU. · NYSE"
+    assert df.loc["ECOPETROL.CL", "pais_bolsa"] == "Colombia · BVC (Bogotá)"
+    assert df.loc["EC", "moneda"] == "USD" and df.loc["EC", "pais"] == "EE. UU."
     assert df.loc["E1CO34.SA", "moneda"] == "BRL"
-    assert search_world("e", searcher=lambda q: quotes).empty  # texto muy corto: no consulta
-    assert parse_world_quotes([]).empty
+    assert add_place_columns(yahoo_search("x", searcher=lambda q: []), "Buscador").empty
 
 
 def test_verified_list_has_country_and_currency_and_no_dead_tickers():

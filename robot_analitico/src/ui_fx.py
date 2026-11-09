@@ -1071,6 +1071,10 @@ html { font-optical-sizing: auto; }
 .ins-sec.ind { border-color: rgba(var(--dp-accent-rgb), 0.3); background: rgba(var(--dp-accent-rgb), 0.04); }
 .ins-sec.ind li { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 0.82rem; }
 .ins-sec.lim .ins-st svg { color: var(--dp-amber); }
+.ins-sec.ana { border-color: rgba(var(--dp-blue-rgb), 0.35); background: rgba(var(--dp-blue-rgb), 0.05); }
+.ins-sec.ana .ins-st svg { color: var(--dp-blue); }
+.ins-sec.ana li { margin: 5px 0; }
+
 .ins-sec.ex { border-style: dashed; }
 .ins-badge { display: inline-block; margin: 2px 0 4px; padding: 2px 9px; border-radius: 999px; font-size: 0.7rem; font-weight: 600; }
 .ins-badge.real { color: var(--dp-on-accent); background: linear-gradient(180deg, var(--dp-accent-hi), var(--dp-accent-lo)); }

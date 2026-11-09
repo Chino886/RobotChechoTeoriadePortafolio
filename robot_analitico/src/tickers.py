@@ -112,7 +112,75 @@ def search(df: pd.DataFrame, text: str, kind: str = "Todos") -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Otras bolsas del mundo (formato de Yahoo Finance: sufijo después del punto)
+# Empresas de otras bolsas (búsqueda de Yahoo Finance)
+# El directorio de NASDAQ Trader solo trae las bolsas de EE. UU. Para empresas de otros países se
+# consulta el buscador de Yahoo Finance (la misma fuente de los precios). El sufijo del ticker dice
+# la bolsa y la moneda en que cotiza; la Comparación ya convierte esa moneda a la moneda base.
+# ---------------------------------------------------------------------------
+SUFFIX_MARKETS = {
+    "CL": ("Bolsa de Colombia", "COP"), "MX": ("Bolsa Mexicana", "MXN"), "SA": ("B3 Brasil", "BRL"),
+    "BA": ("Bolsa de Buenos Aires", "ARS"), "SN": ("Bolsa de Santiago", "CLP"), "LM": ("Bolsa de Lima", "PEN"),
+    "TO": ("Bolsa de Toronto", "CAD"), "V": ("TSX Venture", "CAD"), "L": ("Bolsa de Londres", "GBP (peniques)"),
+    "DE": ("Xetra Alemania", "EUR"), "F": ("Bolsa de Fráncfort", "EUR"), "PA": ("Euronext París", "EUR"),
+    "AS": ("Euronext Ámsterdam", "EUR"), "BR": ("Euronext Bruselas", "EUR"), "LS": ("Euronext Lisboa", "EUR"),
+    "MC": ("Bolsa de Madrid", "EUR"), "MI": ("Bolsa de Milán", "EUR"), "HE": ("Bolsa de Helsinki", "EUR"),
+    "SW": ("SIX Suiza", "CHF"), "ST": ("Bolsa de Estocolmo", "SEK"), "OL": ("Bolsa de Oslo", "NOK"),
+    "CO": ("Bolsa de Copenhague", "DKK"), "T": ("Bolsa de Tokio", "JPY"), "HK": ("Bolsa de Hong Kong", "HKD"),
+    "SS": ("Bolsa de Shanghái", "CNY"), "SZ": ("Bolsa de Shenzhen", "CNY"), "KS": ("Bolsa de Corea", "KRW"),
+    "TW": ("Bolsa de Taiwán", "TWD"), "NS": ("NSE India", "INR"), "BO": ("Bolsa de Bombay", "INR"),
+    "AX": ("Bolsa de Australia", "AUD"), "NZ": ("Bolsa de Nueva Zelanda", "NZD"), "SI": ("Bolsa de Singapur", "SGD"),
+    "JO": ("Bolsa de Johannesburgo", "ZAR (centavos)"),
+}
+_QUOTE_TYPES = {"EQUITY": "Acción", "ETF": "Fondo (ETF)"}
+
+
+def market_of(ticker: str, exch_disp: str = "") -> str:
+    """Texto de la columna «bolsa» para un ticker de Yahoo: nombre de la bolsa y moneda según su sufijo."""
+    suffix = ticker.rsplit(".", 1)[1].upper() if "." in ticker else ""
+    if suffix in SUFFIX_MARKETS:
+        name, ccy = SUFFIX_MARKETS[suffix]
+        return f"{name} · {ccy}"
+    return (exch_disp or "Otra bolsa").strip()
+
+
+def parse_yahoo_search(quotes) -> pd.DataFrame:
+    """Resultados del buscador de Yahoo (acciones y ETF) en las mismas columnas del directorio."""
+    rows = []
+    for q in quotes or []:
+        kind = _QUOTE_TYPES.get(str(q.get("quoteType", "")).upper())
+        symbol = str(q.get("symbol") or "").strip()
+        if not kind or not symbol:
+            continue
+        name = str(q.get("longname") or q.get("shortname") or symbol).strip()
+        rows.append((symbol, name, market_of(symbol, str(q.get("exchDisp") or q.get("exchange") or "")), kind))
+    return pd.DataFrame(rows, columns=COLUMNS).drop_duplicates("ticker")
+
+
+def yahoo_search(text: str, max_results: int = 25, searcher=None) -> pd.DataFrame:
+    """Busca en Yahoo Finance (todas las bolsas). Lanza la excepción si la consulta falla."""
+    if searcher is None:
+        import yfinance as yf
+        if not hasattr(yf, "Search"):
+            raise RuntimeError("Esta versión de yfinance no trae el buscador (se necesita yfinance 0.2.47 o más).")
+        searcher = lambda q: yf.Search(q, max_results=max_results, news_count=0, raise_errors=True).quotes  # noqa: E731
+    return parse_yahoo_search(searcher(text))
+
+
+def merge_international(local: pd.DataFrame, international: pd.DataFrame, kind: str = "Todos",
+                        keep_first: int = 20) -> pd.DataFrame:
+    """
+    Junta el directorio de EE. UU. con lo de otras bolsas (sin repetir tickers): primero los mejores
+    resultados locales, luego los internacionales y después el resto, para que no queden escondidos.
+    """
+    if international is None or international.empty:
+        return local
+    extra = international[~international["ticker"].isin(set(local["ticker"]))]
+    if kind != "Todos":
+        extra = extra[extra["tipo"] == kind]
+    return pd.concat([local.head(keep_first), extra, local.iloc[keep_first:]], ignore_index=True)
+
+
+# País y moneda de cotización de cada ticker (columnas «País/Bolsa» y «Moneda» de la pestaña Tickers)
 # ---------------------------------------------------------------------------
 # Sufijo de Yahoo → (país, bolsa, moneda de cotización). La moneda es la que Yahoo informa para esa
 # bolsa; al descargar el activo, el bot la vuelve a leer de Yahoo y usa esa (no esta tabla).
@@ -132,7 +200,6 @@ SUFFIX_INFO = {
 # Códigos de bolsa de Yahoo que son de EE. UU. (tickers sin sufijo)
 US_EXCHANGES = {"NMS": "NASDAQ", "NGM": "NASDAQ", "NCM": "NASDAQ", "NYQ": "NYSE", "ASE": "NYSE American",
                 "PCX": "NYSE Arca", "BTS": "Cboe", "NAS": "NASDAQ"}
-WORLD_TYPES = {"EQUITY": "Acción", "ETF": "Fondo (ETF)"}
 
 # Acciones internacionales comprobadas con una consulta real a Yahoo Finance (precios 2024-01-01 a
 # 2026-11-06 y moneda informada por Yahoo). Se dejaron fuera las que no trajeron datos ese día:
@@ -160,6 +227,11 @@ def place_info(symbol: str, exchange: str = "", exch_disp: str = "") -> "tuple[s
             return SUFFIX_INFO[suf]
     if exchange in US_EXCHANGES or ("." not in sym and not exchange):
         return ("EE. UU.", US_EXCHANGES.get(exchange, exch_disp or "EE. UU."), "USD")
+    if "." in sym:  # sufijo que solo está en la tabla del buscador (SUFFIX_MARKETS): bolsa y moneda de allí
+        suf = sym.rsplit(".", 1)[1]
+        if suf in SUFFIX_MARKETS:
+            name, ccy = SUFFIX_MARKETS[suf]
+            return ("Otro país", name, ccy)
     return ("Otro", exch_disp or exchange or "N/D", "N/D")
 
 
@@ -173,7 +245,6 @@ def add_place_columns(df: pd.DataFrame, fuente: str) -> pd.DataFrame:
     out["pais"] = [i[0] for i in info]
     out["pais_bolsa"] = [f"{i[0]} · {i[1]}" for i in info]
     out["moneda"] = [i[2] for i in info]
-    out["bolsa"] = [i[1] for i in info]
     out["fuente"] = fuente
     return out[WORLD_COLUMNS]
 
@@ -185,32 +256,3 @@ def verified_international() -> pd.DataFrame:
         pais, bolsa, moneda = place_info(t)
         rows.append((t, name, bolsa, "Acción", pais, f"{pais} · {bolsa}", moneda, f"Lista verificada ({VERIFIED_ON})"))
     return pd.DataFrame(rows, columns=WORLD_COLUMNS)
-
-
-def parse_world_quotes(quotes: "list[dict]") -> pd.DataFrame:
-    """Convierte los resultados de yfinance.Search en filas del directorio (solo acciones y ETF)."""
-    rows = []
-    for q in quotes or []:
-        sym, kind = str(q.get("symbol") or "").strip().upper(), WORLD_TYPES.get(q.get("quoteType"))
-        if not sym or not kind:
-            continue
-        pais, bolsa, moneda = place_info(sym, q.get("exchange") or "", q.get("exchDisp") or "")
-        name = str(q.get("longname") or q.get("shortname") or sym).strip()
-        rows.append((sym, name, bolsa, kind, pais, f"{pais} · {bolsa}", moneda, "Búsqueda Yahoo Finance"))
-    return pd.DataFrame(rows, columns=WORLD_COLUMNS).drop_duplicates("ticker")
-
-
-def search_world(text: str, searcher=None, max_results: int = 20) -> pd.DataFrame:
-    """
-    Busca por nombre en todas las bolsas con yfinance.Search (Yahoo Finance). Lanza la excepción si
-    Yahoo no responde, para que el llamador lo informe; no inventa resultados.
-    """
-    text = (text or "").strip()
-    if len(text) < 2:
-        return pd.DataFrame(columns=WORLD_COLUMNS)
-    if searcher is None:
-        import yfinance as yf
-
-        searcher = lambda q: yf.Search(q, max_results=max_results, news_count=0, lists_count=0,  # noqa: E731
-                                       recommended=0, raise_errors=True).quotes
-    return parse_world_quotes(searcher(text))

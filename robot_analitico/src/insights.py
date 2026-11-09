@@ -39,6 +39,9 @@ class Answer:
     sources: "list[str]" = field(default_factory=list)
     has_data: bool = False
     refused: bool = False
+    analysis: "list[str]" = field(default_factory=list)  # lectura a fondo de los valores de la sesión
+    followups: "list[str]" = field(default_factory=list)  # preguntas para seguir profundizando
+    also: "list[str]" = field(default_factory=list)  # otros temas de la misma pregunta
 
 
 def _norm(text: str) -> str:
@@ -58,6 +61,10 @@ def _n(x, d: int = 3) -> str:
 # Detección del tema (palabras clave en español, sin tildes)
 # ---------------------------------------------------------------------------
 TOPICS = {
+    "summary": ("Resumen de tus resultados", ["resumen", "resume", "panorama", "analiza todo", "que me dicen mis",
+                                              "conclusion", "en general", "todo lo que", "mis resultados"]),
+    "compare": ("Comparación entre activos", ["compara", "comparar", "comparacion", " vs ", "versus", "diferencia entre",
+                                              "cual es mas", "cual tiene"]),
     "sharpe": ("Sharpe Ratio", ["sharpe"]),
     "beta": ("Beta", ["beta", "capm", "sistematic", "mercado", "benchmark"]),
     "bl": ("Black-Litterman", ["black", "litterman", "view", "posterior", "prior"]),
@@ -66,7 +73,7 @@ TOPICS = {
     "diversification": ("Diversificación", ["diversific", "correlacion", "covarianza", "combinar", "cartera"]),
     "forecast": ("Pronósticos", ["pronostic", "predic", "futuro", "intervalo", "proyecc", "horizonte"]),
     "rates": ("Tasas soberanas", ["tasa", "bono", "soberan", "fred", "libre de riesgo", "tesoro"]),
-    "drawdown": ("Máxima caída (drawdown)", ["drawdown", "caida", "perdida maxima"]),
+    "drawdown": ("Máxima caída (drawdown)", ["drawdown", "caida", "perdida maxima", "recuper"]),
     "volatility": ("Volatilidad", ["volatil", "riesgo", "desviacion", "sigma", "variabilidad"]),
     "return": ("Rentabilidad", ["rentab", "rendimiento", "retorno", "media", "ganancia", "gana"]),
 }
@@ -81,6 +88,8 @@ SUGGESTIONS = [
     ("bl", "¿Qué significan los resultados de Black-Litterman?"),
     ("forecast", "¿Cómo interpreto el pronóstico?"),
     ("rates", "¿Qué representan las tasas soberanas?"),
+    ("summary", "Hazme un resumen de mis resultados"),
+    ("compare", "Compara los activos de mi comparación"),
 ]
 _ADVICE = re.compile(
     r"\b(compro|comprar|compre|compraria|vendo|vender|venda|venderia|invierto|invertiria|"
@@ -89,14 +98,16 @@ _ADVICE = re.compile(
     r"mejor inversion|donde pongo mi dinero|cuanto (invierto|debo invertir))\b")
 
 
+def detect_topics(question: str) -> "list[str]":
+    """Todos los temas de la pregunta, del más nombrado al menos (en empate, el orden de TOPICS)."""
+    q = f" {_norm(question)} "
+    scored = [(sum(1 for w in words if w in q), i, key) for i, (key, (_t, words)) in enumerate(TOPICS.items())]
+    return [key for s, _i, key in sorted(scored, key=lambda x: (-x[0], x[1])) if s > 0]
+
+
 def detect_topic(question: str) -> Optional[str]:
-    q = _norm(question)
-    best, score = None, 0
-    for key, (_t, words) in TOPICS.items():
-        s = sum(1 for w in words if w in q)
-        if s > score:  # en empate gana el primero de TOPICS (los más específicos van antes)
-            best, score = key, s
-    return best
+    topics = detect_topics(question)
+    return topics[0] if topics else None
 
 
 def is_advice_request(question: str) -> bool:
@@ -338,13 +349,41 @@ def _rates(a: Answer, asset, comparison, ctx, sel):
                      "No entra en la preselección ni en el laboratorio de forma automática."]
 
 
-_BUILDERS = {"volatility": _volatility, "return": _return, "drawdown": _drawdown, "sharpe": _sharpe, "beta": _beta,
+def _summary(a: Answer, asset, comparison, ctx, sel):
+    a.simple = "Este es el panorama de lo que el bot ya calculó en tu sesión, leído en conjunto."
+    a.interpretation = ("Mira primero el par riesgo-rentabilidad (σ y μ), después cómo se combinan los activos (correlación "
+                        "y carteras de Markowitz/Black-Litterman) y por último la sensibilidad al mercado (beta) y los rangos "
+                        "del pronóstico. Ningún número aislado basta para concluir.")
+    a.indicator = [v["label"] + " · " + v["ts"] for v in ctx.values()] + (
+        [f"Activo descargado: {asset['ticker']}"] if asset else []) + (
+        [f"Comparación de {len(comparison['rows'])} activos"] if comparison else [])
+    a.has_data = bool(a.indicator)
+    a.sources = ["Todo lo calculado en esta sesión"]
+    a.limitations = ["El resumen solo incluye los módulos que ya se abrieron en esta sesión."] + _COMMON_LIMITS
+
+
+def _compare(a: Answer, asset, comparison, ctx, sel):
+    a.simple = ("Comparar activos es mirar a la vez cuánto rindieron (μ) y cuánto oscilaron (σ): un activo es mejor que "
+                "otro en el sentido de Markowitz solo si gana en las dos cosas (lo «domina»).")
+    a.interpretation = ("La RVR (μ/σ) resume ambas en una sola cifra, y la máxima caída muestra el peor tramo vivido. "
+                        "Los no dominados forman el borde del mapa riesgo-rentabilidad.")
+    if comparison:
+        a.indicator = [f"{r['ticker']}: μ {_p(r['mean'])} · σ {_p(r['vol'])} · RVR {_n(r.get('rvr'))}"
+                       for r in sorted(comparison["rows"], key=lambda r: -(r.get("rvr") or -9))[:8]]
+        a.has_data, a.sources = True, ["Preselección → Comparación y preselección"]
+    else:
+        a.indicator = ["Aún no hay una comparación en esta sesión: hazla en Preselección → Comparación y preselección."]
+    a.limitations = ["Todos los activos se miden en la misma ventana común y moneda base: cambiar fechas cambia el ranking."] \
+        + _COMMON_LIMITS
+
+
+_BUILDERS = {"summary": _summary, "compare": _compare, "volatility": _volatility, "return": _return, "drawdown": _drawdown, "sharpe": _sharpe, "beta": _beta,
              "frontier": _frontier, "markowitz": _markowitz, "bl": _bl, "diversification": _diversification,
              "forecast": _forecast, "rates": _rates}
 
 
 def answer(question: str, asset: Optional[dict], comparison: Optional[dict], ctx: dict,
-           selected: Optional[tuple] = None) -> Answer:
+           selected: Optional[tuple] = None, previous_topic: Optional[str] = None) -> Answer:
     """Respuesta organizada. `selected` = (id, etiqueta, tema) del resultado elegido, si hay."""
     if is_advice_request(question):
         return Answer(
@@ -354,7 +393,18 @@ def answer(question: str, asset: Optional[dict], comparison: Optional[dict], ctx
             interpretation="Esa decisión depende de tu situación personal y de un asesor habilitado.",
             limitations=["Ningún resultado del bot es una recomendación personalizada de inversión."],
             example="Prueba: «¿Qué significa la volatilidad de este activo?» o «¿Cómo leo la frontera eficiente?».")
-    topic = detect_topic(question)
+    from src.insights_analysis import FOLLOWUPS, analyze, mentioned_tickers
+    topics = detect_topics(question)
+    tickers = mentioned_tickers(question, asset, comparison)
+    q = _norm(question)
+    if not topics and previous_topic and previous_topic in TOPICS and (
+            len(q.split()) <= 6 or q.lstrip().startswith(("y ", "pero", "entonces", "por que", "como asi", "explica mas"))):
+        topics = [previous_topic]  # pregunta de seguimiento («¿y la tangente?», «explica más»)
+    if not topics and len(tickers) >= 2:
+        topics = ["compare"]
+    elif not topics and tickers:
+        topics = ["volatility", "return"]
+    topic = topics[0] if topics else None
     sel_id = None
     if selected:
         sel_id, _label, sel_topic = selected
@@ -370,6 +420,23 @@ def answer(question: str, asset: Optional[dict], comparison: Optional[dict], ctx
     _BUILDERS[topic](a, asset, comparison, ctx, sel_id)
     if not a.has_data and not a.indicator:
         a.indicator = ["No hay un resultado de este tipo en la sesión; la explicación es general."]
+    # Lectura a fondo: el tema principal y, si la pregunta nombra otros, también esos.
+    a.analysis = analyze(topic, asset, comparison, ctx, tickers, question)
+    for extra in [t for t in topics[1:3] if t != topic]:
+        more = analyze(extra, asset, comparison, ctx, tickers, question)
+        if more:
+            a.also.append(TOPICS[extra][0])
+            a.analysis += [f"[{TOPICS[extra][0]}] {x}" for x in more]
+    seen = []
+    for x in a.analysis:  # sin repetir frases cuando dos temas leen el mismo dato
+        if x not in seen:
+            seen.append(x)
+    a.analysis = seen[:12]
+    if a.analysis:
+        a.has_data = True
+    a.followups = [f for f in FOLLOWUPS.get(topic, []) if _norm(f) != _norm(question)][:3]
+    if a.also:
+        a.title += " · " + " · ".join(a.also)
     return a
 
 
@@ -388,6 +455,10 @@ def answer_html(a: dict, icon_fn) -> str:
         parts.append(sec("info", "Explicación sencilla", f"<p>{escape(a['simple'])}</p>"))
     if a.get("interpretation"):
         parts.append(sec("trending", "Interpretación financiera", f"<p>{escape(a['interpretation'])}</p>"))
+    if a.get("analysis") and not a.get("refused"):
+        items = "".join(f"<li>{escape(x)}</li>" for x in a["analysis"])
+        parts.append(sec("activity", "Análisis de tus resultados",
+                         '<span class="ins-badge real">Calculado con tus valores</span>' + f"<ul>{items}</ul>", "ana"))
     if a.get("indicator") and not a.get("refused"):
         badge = ('<span class="ins-badge real">Valores reales de tu sesión</span>' if a.get("has_data")
                  else '<span class="ins-badge gen">Sin resultado en la sesión · explicación general</span>')
