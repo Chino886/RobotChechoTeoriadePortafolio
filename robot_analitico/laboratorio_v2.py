@@ -230,6 +230,8 @@ MODULE_TITLES = [
     ("La hoja de vida de la cartera", "Ficha técnica (estructura de la Superintendencia Financiera)"),
     ("Guardar y comprobar", "Exportar traza y snapshot"),
 ]
+# Perfil de riesgo → aversión al riesgo γ (decisión del equipo, 2026-11-09). None = el usuario escribe γ.
+RISK_PROFILES = {"Conservador": 10.0, "Moderado": 5.0, "Agresivo": 2.0, "Personalizado": None}
 SOURCE_SHORT = {SOURCE_TWO: "Caso docente", SOURCE_SYNTH: "Sintético", SOURCE_MARKET: "Mercado real"}
 
 # Estructura (no colores): tarjetas redondeadas con aire, pestañas tipo SaaS y títulos de doble etiqueta.
@@ -1646,8 +1648,19 @@ def render_portfolio_lab() -> None:
         rf_ea = c3.number_input("Tasa libre de riesgo (Rf)", value=float(ctrl["rf"]), step=0.005, format="%.4f", key="lab_rf",
                                 help="Lo que ganarías al año **sin arriesgar nada**, por ejemplo prestándole al gobierno. "
                                      "0,03 = 3 %. Mira la pestaña Tasas soberanas.")
-        gamma = c4.number_input("Aversión al riesgo (γ)", value=float(ctrl["gamma"]), min_value=0.5, step=0.5, key="lab_gamma",
-                                help="Qué tanto te asusta perder. 2 = te arriesgas bastante; 10 = prefieres ir a la segura.")
+        profile = c4.selectbox(
+            "¿Qué tan arriesgado quieres ser?", list(RISK_PROFILES), index=1, key="lab_risk_profile",
+            help="- **Conservador:** prefieres ir a la segura (γ = 10).\n- **Moderado:** un punto medio (γ = 5, el del "
+                 "ejemplo del profesor).\n- **Agresivo:** aceptas más subidas y bajadas para buscar más ganancia (γ = 2)."
+                 "\n- **Personalizado:** escribes tú el número γ.\n\nEl bot usa ese número para armar tu cartera "
+                 "(el «óptimo personal»).")
+        if RISK_PROFILES[profile] is None:
+            gamma = c4.number_input("Aversión al riesgo (γ)", value=float(ctrl["gamma"]), min_value=0.5, step=0.5,
+                                    key="lab_gamma",
+                                    help="Qué tanto te asusta perder. 2 = te arriesgas bastante; 10 = prefieres ir a la segura.")
+        else:
+            gamma = RISK_PROFILES[profile]
+            c4.caption(f"Aversión al riesgo usada: **γ = {gamma:g}**")
         lo, hi = c5.slider("Límites de peso", min_value=-1.0, max_value=2.0,
                            value=(float(ctrl["bounds"][0][0]), float(ctrl["bounds"][0][1])), step=0.05, format="%.2f",
                            key="lab_weight_range",
