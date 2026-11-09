@@ -5,6 +5,13 @@ Formato basado en *Keep a Changelog*. Versiones: `MAYOR.MENOR.PARCHE`.
 ## [2.0.0] — 2026-11-06 (entrega final)
 
 ### Agregado
+- Acciones de otras bolsas: la pestaña Tickers busca también en Yahoo Finance (Colombia .CL, Brasil .SA, México .MX,
+  Chile .SN, Europa .DE/.PA/.L y Asia .T…), con columnas «País/Bolsa» y «Moneda de cotización», filtro por país o
+  moneda, nota de ADR vs. acción local y una lista de 22 acciones internacionales verificadas el 2026-11-09.
+- Comparación: selector de moneda base (USD o COP) y recuadro «Conversión de monedas» con el par usado, la tasa del
+  primer y último día, la hora de consulta y el precio original vs. convertido de cada activo.
+- Datos del activo: moneda original e interruptor «Ver el precio también en USD» (mismo tipo de cambio y alineación).
+- Las cotizaciones en peniques (GBp, Londres) se pasan a libras antes de convertir.
 - Botón flotante «¿Necesitas ayuda?» (abajo a la derecha, encima de «Ir a… Ctrl K»): dice en qué sección y módulo
   estás, qué puedes hacer ahí, el siguiente paso de uso según lo que ya hiciste (y los avisos del Centro de estados),
   preguntas frecuentes, glosario y acceso al buscador. Sin IA ni servicios externos; se oculta en Modo presentación.
