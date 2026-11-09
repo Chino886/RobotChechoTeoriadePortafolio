@@ -51,6 +51,7 @@ SERVICES = {
     "alpha_vantage": ("Alpha Vantage · noticias", "Alpha Vantage", "Inicio · Noticias"),
     "yahoo_news": ("Yahoo Finance · noticias", "Yahoo Finance", "Inicio · Noticias de la empresa"),
     "nasdaq": ("NASDAQ Trader · directorio", "NASDAQ Trader", "Tickers"),
+    "yahoo_search": ("Yahoo Finance · buscador", "Yahoo Finance (todas las bolsas)", "Tickers · otras bolsas"),
 }
 # nombres de la prueba «Comprobar conexiones reales» → servicio
 CHECK_NAMES = {"Yahoo Finance · cotización (1 min)": "yahoo_quote", "Yahoo Finance · históricos": "yahoo_hist",

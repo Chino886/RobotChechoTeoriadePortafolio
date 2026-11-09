@@ -103,7 +103,8 @@ from src.data import FREQUENCY_RULES, fetch_asset_data, fetch_fx_to_usd, fetch_m
 from src.market import fetch_quotes
 from ayuda import AYUDA
 from src.connectivity import run_checks
-from src.tickers import fallback_tickers, fetch_us_tickers, search as search_tickers
+import src.tickers as _tickers_mod
+from src.tickers import fallback_tickers, fetch_us_tickers, merge_international, search as search_tickers
 from src.trace import git_commit
 from src.risk_extras import expected_shortfall_fraction
 from src.rates import fetch_bond_series, list_long_term_yield_countries, ping_fred, search_bond_series
@@ -2350,6 +2351,20 @@ def _ticker_directory() -> "tuple[pd.DataFrame, bool]":
         return fallback_tickers(), False
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _yahoo_ticker_search_cached(query: str) -> pd.DataFrame:
+    """Se guarda 1 h solo si responde: si falla lanza la excepción y Streamlit no guarda el fallo."""
+    return _tickers_mod.yahoo_search(query)
+
+
+def _yahoo_ticker_search(query: str) -> "tuple[pd.DataFrame, str | None]":
+    """Empresas de todas las bolsas según el buscador de Yahoo Finance. Devuelve (resultados, error)."""
+    try:
+        return _yahoo_ticker_search_cached(query), None
+    except Exception as exc:  # noqa: BLE001 — se muestra un aviso claro y el detalle va al registro
+        return pd.DataFrame(columns=["ticker", "empresa", "bolsa", "tipo"]), f"{type(exc).__name__}: {exc}"
+
+
 def _use_ticker(ticker: str) -> None:
     st.session_state["asset_ticker"] = ticker
     st.session_state["ticker_chosen_msg"] = ticker
@@ -2445,6 +2460,18 @@ def render_tickers_page() -> None:
                 "- **Acción:** una parte de una empresa.\n- **Fondo (ETF):** una canasta de muchas acciones que se "
                 "compra como si fuera una sola."))
             found = search_tickers(directory, text, kind)
+            query = (text or "").strip()
+            intl, intl_error = (None, None)
+            if len(query) >= 2:  # otras bolsas: buscador de Yahoo Finance (una consulta por búsqueda, guardada 1 h)
+                with status_loading("table", f"Buscando «{query}» en otras bolsas (Yahoo Finance)…", "yahoo_search"):
+                    intl, intl_error = _yahoo_ticker_search(query)
+                if intl_error:
+                    status_set(st.session_state, "yahoo_search", status_classify(intl_error), intl_error)
+                    status_log.warning("[Tickers] búsqueda en Yahoo falló | %s", intl_error)
+                else:
+                    status_set(st.session_state, "yahoo_search", "ok" if len(intl) else "nodata",
+                               f"«{query}»: {len(intl)} resultado(s) en todas las bolsas")
+                found = merge_international(found, intl, kind)
             chips = []
             if (text or "").strip():
                 chips.append(f'{icon("search", 12)}«{html_escape(text.strip())}»')
@@ -2459,6 +2486,15 @@ def render_tickers_page() -> None:
             if complete:
                 st.caption(f"{len(directory):,} empresas y fondos de las bolsas de Estados Unidos (directorio público de "
                            "NASDAQ Trader, se actualiza cada día).")
+            if len(query) >= 2:
+                n_intl = 0 if intl is None else int((~intl["ticker"].isin(set(directory["ticker"]))).sum())
+                if intl_error:
+                    st.caption("No se pudo buscar en otras bolsas en este momento (Yahoo Finance); se muestran solo las de "
+                               "EE. UU. Vuelve a intentar en un rato.")
+                else:
+                    st.caption(f"Otras bolsas (Yahoo Finance): {n_intl} resultado(s) de fuera de EE. UU. — por ejemplo "
+                               "«.CL» Colombia, «.MX» México, «.SA» Brasil, «.DE» Alemania. Su moneda aparece en la "
+                               "columna Bolsa; la Comparación la convierte a la moneda base.")
             else:
                 show_status_error("Tickers", "No se pudo cargar el directorio completo",
                                   "Directorio de NASDAQ Trader (todas las empresas)",

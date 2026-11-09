@@ -109,3 +109,72 @@ def search(df: pd.DataFrame, text: str, kind: str = "Todos") -> pd.DataFrame:
             hit = hit | names.map(lambda n: all(w in n for w in words)) | joined.str.contains("".join(words), regex=False)
         out = pd.concat([out[exact], out[hit & ~exact]])
     return out
+
+
+# ---------------------------------------------------------------------------
+# Empresas de otras bolsas (búsqueda de Yahoo Finance)
+# El directorio de NASDAQ Trader solo trae las bolsas de EE. UU. Para empresas de otros países se
+# consulta el buscador de Yahoo Finance (la misma fuente de los precios). El sufijo del ticker dice
+# la bolsa y la moneda en que cotiza; la Comparación ya convierte esa moneda a la moneda base.
+# ---------------------------------------------------------------------------
+SUFFIX_MARKETS = {
+    "CL": ("Bolsa de Colombia", "COP"), "MX": ("Bolsa Mexicana", "MXN"), "SA": ("B3 Brasil", "BRL"),
+    "BA": ("Bolsa de Buenos Aires", "ARS"), "SN": ("Bolsa de Santiago", "CLP"), "LM": ("Bolsa de Lima", "PEN"),
+    "TO": ("Bolsa de Toronto", "CAD"), "V": ("TSX Venture", "CAD"), "L": ("Bolsa de Londres", "GBP (peniques)"),
+    "DE": ("Xetra Alemania", "EUR"), "F": ("Bolsa de Fráncfort", "EUR"), "PA": ("Euronext París", "EUR"),
+    "AS": ("Euronext Ámsterdam", "EUR"), "BR": ("Euronext Bruselas", "EUR"), "LS": ("Euronext Lisboa", "EUR"),
+    "MC": ("Bolsa de Madrid", "EUR"), "MI": ("Bolsa de Milán", "EUR"), "HE": ("Bolsa de Helsinki", "EUR"),
+    "SW": ("SIX Suiza", "CHF"), "ST": ("Bolsa de Estocolmo", "SEK"), "OL": ("Bolsa de Oslo", "NOK"),
+    "CO": ("Bolsa de Copenhague", "DKK"), "T": ("Bolsa de Tokio", "JPY"), "HK": ("Bolsa de Hong Kong", "HKD"),
+    "SS": ("Bolsa de Shanghái", "CNY"), "SZ": ("Bolsa de Shenzhen", "CNY"), "KS": ("Bolsa de Corea", "KRW"),
+    "TW": ("Bolsa de Taiwán", "TWD"), "NS": ("NSE India", "INR"), "BO": ("Bolsa de Bombay", "INR"),
+    "AX": ("Bolsa de Australia", "AUD"), "NZ": ("Bolsa de Nueva Zelanda", "NZD"), "SI": ("Bolsa de Singapur", "SGD"),
+    "JO": ("Bolsa de Johannesburgo", "ZAR (centavos)"),
+}
+_QUOTE_TYPES = {"EQUITY": "Acción", "ETF": "Fondo (ETF)"}
+
+
+def market_of(ticker: str, exch_disp: str = "") -> str:
+    """Texto de la columna «bolsa» para un ticker de Yahoo: nombre de la bolsa y moneda según su sufijo."""
+    suffix = ticker.rsplit(".", 1)[1].upper() if "." in ticker else ""
+    if suffix in SUFFIX_MARKETS:
+        name, ccy = SUFFIX_MARKETS[suffix]
+        return f"{name} · {ccy}"
+    return (exch_disp or "Otra bolsa").strip()
+
+
+def parse_yahoo_search(quotes) -> pd.DataFrame:
+    """Resultados del buscador de Yahoo (acciones y ETF) en las mismas columnas del directorio."""
+    rows = []
+    for q in quotes or []:
+        kind = _QUOTE_TYPES.get(str(q.get("quoteType", "")).upper())
+        symbol = str(q.get("symbol") or "").strip()
+        if not kind or not symbol:
+            continue
+        name = str(q.get("longname") or q.get("shortname") or symbol).strip()
+        rows.append((symbol, name, market_of(symbol, str(q.get("exchDisp") or q.get("exchange") or "")), kind))
+    return pd.DataFrame(rows, columns=COLUMNS).drop_duplicates("ticker")
+
+
+def yahoo_search(text: str, max_results: int = 25, searcher=None) -> pd.DataFrame:
+    """Busca en Yahoo Finance (todas las bolsas). Lanza la excepción si la consulta falla."""
+    if searcher is None:
+        import yfinance as yf
+        if not hasattr(yf, "Search"):
+            raise RuntimeError("Esta versión de yfinance no trae el buscador (se necesita yfinance 0.2.47 o más).")
+        searcher = lambda q: yf.Search(q, max_results=max_results, news_count=0, raise_errors=True).quotes  # noqa: E731
+    return parse_yahoo_search(searcher(text))
+
+
+def merge_international(local: pd.DataFrame, international: pd.DataFrame, kind: str = "Todos",
+                        keep_first: int = 20) -> pd.DataFrame:
+    """
+    Junta el directorio de EE. UU. con lo de otras bolsas (sin repetir tickers): primero los mejores
+    resultados locales, luego los internacionales y después el resto, para que no queden escondidos.
+    """
+    if international is None or international.empty:
+        return local
+    extra = international[~international["ticker"].isin(set(local["ticker"]))]
+    if kind != "Todos":
+        extra = extra[extra["tipo"] == kind]
+    return pd.concat([local.head(keep_first), extra, local.iloc[keep_first:]], ignore_index=True)
