@@ -165,3 +165,7 @@ def test_single_asset_risk_shows_expected_shortfall(monkeypatch):
     es = next(v for k, v in labels.items() if k.startswith("Pérdida esperada ES"))
     var = next(v for k, v in labels.items() if k.startswith("VaR fraccional"))
     assert float(es.rstrip("%")) >= float(var.rstrip("%"))
+    # Descriptivos: los valores exactos van en una tabla legible, no como diccionario en formato código.
+    exact = next(d.value for d in at.dataframe if "Indicador" in getattr(d.value, "columns", []))
+    assert {"Muestra completa", "Media por periodo", "Volatilidad anualizada"} & (set(exact.columns) | set(exact["Indicador"]))
+    assert not any("mediana" in str(j.value) for j in at.json)  # el único JSON es la traza de Exportar
