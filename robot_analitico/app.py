@@ -107,7 +107,7 @@ from src.tickers import fallback_tickers, fetch_us_tickers, search as search_tic
 from src.trace import git_commit
 from src.risk_extras import expected_shortfall_fraction
 from src.rates import fetch_bond_series, list_long_term_yield_countries, ping_fred, search_bond_series
-from laboratorio_v2 import LAB_MODULES, render_portfolio_lab
+from laboratorio_v2 import LAB_MODULES, MODULE_TITLES, SOURCE_MARKET, render_portfolio_lab
 from html import escape as html_escape
 
 from src.ui_fx import (apply_ui_fx, empty_state_html, icon, news_carousel_html, page_header_html,
@@ -124,6 +124,9 @@ from src.status_ui import (STATE_KEY as STATUS_KEY, classify as status_classify,
                           set_state as status_set, show_error as show_status_error, status_center_html,
                           sync_from_checks)
 from src.status_ui import CHECK_NAMES as STATUS_CHECK_NAMES
+from src.status_ui import REASONS as STATUS_REASONS, SERVICES as STATUS_SERVICES, STATES as STATUS_STATES
+from src.help_assistant import session_summary as help_session_summary
+from src.help_ui import fill_help_fab, open_help_fab
 from src.dashboard import Kpi, Service, TrackedAsset, dashboard_html, spark_data, track_activity
 from src.forecasting import (
     FORECAST_MODELS,
@@ -2278,6 +2281,9 @@ def main() -> None:
         user_name, user_email = getattr(user, "name", "?"), getattr(user, "email", "?")
 
     render_disclaimer_gate(user_name, user_email)
+    # Botón flotante «¿Necesitas ayuda?»: la pastilla aparece apenas se aceptan los consentimientos;
+    # su ventana se llena al final, cuando ya se sabe qué se calculó y qué avisos hay.
+    help_pop = open_help_fab()
 
     # Menú superior. Se usan pestañas (y no páginas de st.navigation) para que
     # los datos escritos en una sección no se borren al pasar a otra.
@@ -2307,6 +2313,9 @@ def main() -> None:
     # Centro de estados (pastilla fija del encabezado): refleja solo operaciones reales de esta sesión.
     sync_from_checks(st.session_state, st.session_state.get("conn_check_log") or [])
     st.markdown(status_center_html(st.session_state), unsafe_allow_html=True)
+    fill_help_fab(help_pop, lab_modules=LAB_MODULES, module_titles=MODULE_TITLES, summary=help_session_summary(
+        st.session_state, service_names=STATUS_SERVICES, state_labels=STATUS_STATES, reasons=STATUS_REASONS,
+        conn_key=STATUS_KEY, ctx_key=INSIGHTS_CTX_KEY, market_source=SOURCE_MARKET))
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
