@@ -872,6 +872,7 @@ def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds, group
             rows[label] = r_.weights
         else:
             st.warning(f"{label}: {r_.status}. {r_.message}")
+    st.session_state["lab_bl_weights"] = {k: v.copy() for k, v in rows.items()}  # para usarlos como objetivo en Rebalanceo
     if rows:
         wdf = pd.DataFrame(rows).T
         fig = go.Figure()
@@ -907,7 +908,26 @@ def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds, group
     return res
 
 
-def _tab_rebalance(lab: LabData, gamma: float, bounds, groups=None):
+TARGET_MANUAL, TARGET_EQUAL = "Escribirlos a mano en la tabla", "Partes iguales (1/N)"
+
+
+def _target_presets(lab: LabData, results, bl_res) -> "dict[str, pd.Series]":
+    """Pesos de carteras que el laboratorio YA calculó (Markowitz y Black-Litterman) para usarlos como objetivo."""
+    out = {}
+    names = {"gmv": "GMV (mínima varianza)", "tangent": "Tangente (máximo Sharpe)", "personal": "Óptimo personal (γ)",
+             "top": "Máximo rendimiento"}
+    for key, label in names.items():
+        res = (results or {}).get(key)
+        if res is not None and getattr(res, "ok", False):
+            out[f"Markowitz · {label}"] = res.weights
+    for label, w in (st.session_state.get("lab_bl_weights") or {}).items():
+        if label.startswith("Posterior"):
+            out[f"Black-Litterman · óptimo personal con {label.lower()}"] = w
+    assets = list(lab.mu.index)
+    return {k: w.reindex(assets).fillna(0.0).clip(lower=0.0) for k, w in out.items() if set(assets) <= set(w.index)}
+
+
+def _tab_rebalance(lab: LabData, gamma: float, bounds, groups=None, presets=None):
     ctrl = _load_json("rebalanceo_control.json")
     prices = getattr(lab, "prices", None)
     real = lab.source != SOURCE_TWO and prices is not None and len(prices.dropna(how="any")) >= 2
@@ -925,8 +945,8 @@ def _tab_rebalance(lab: LabData, gamma: float, bounds, groups=None):
         st.caption(
             f"Simulación contable (paper trading): no hay bróker ni órdenes reales. Activos: los {len(assets)} del universo "
             f"elegido arriba. Precios: los dos últimos de la serie ({last2.index[0].date()} y {last2.index[1].date()}), en "
-            f"{currency}. **Cantidades, caja y pesos objetivo los define el equipo**: el peso objetivo inicial es 1/N solo "
-            "como punto de partida.")
+            f"{currency}. **Cantidades, caja y pesos objetivo los define el equipo**: los pesos objetivo se eligen abajo "
+            "(partes iguales, una cartera del laboratorio o a mano).")
     else:
         assets = list(lab.mu.index) if lab.source == SOURCE_TWO and len(lab.mu) == len(ctrl["assets"]) else ctrl["assets"]
         base = pd.DataFrame({
@@ -936,9 +956,35 @@ def _tab_rebalance(lab: LabData, gamma: float, bounds, groups=None):
         currency = ctrl["moneda"]
         st.caption("Simulación contable (paper trading): no hay bróker ni órdenes reales. Valores iniciales de "
                    "rebalanceo_control.json (sintético). La política la define el equipo.")
-    # La tabla depende del universo: si cambian los activos, se arma de nuevo (no se mezclan filas viejas).
-    edited = st.data_editor(base, key=f"lab_reb_book_{abs(hash((lab.source, tuple(assets))))}", num_rows="dynamic",
-                            hide_index=True)
+    presets = presets or {}
+    options = [TARGET_EQUAL, TARGET_MANUAL] + list(presets)
+    if not real:
+        options.insert(0, "Los del archivo de control (caso docente)")
+    choice = st.selectbox(
+        "Pesos objetivo (a qué pesos se quiere volver)", options, key=f"lab_reb_target_{'real' if real else 'ctrl'}",
+        help="Elige de dónde salen los pesos objetivo: partes iguales, una cartera que el laboratorio ya calculó "
+             "(Markowitz o Black-Litterman, con los supuestos de arriba) o escríbelos tú en la columna «peso objetivo» "
+             "de la tabla (doble clic en la celda). Siempre se pueden ajustar a mano después. Es decisión del equipo.")
+    if choice == TARGET_EQUAL or (choice == TARGET_MANUAL and real):
+        base["peso objetivo"] = [1.0 / len(base)] * len(base)
+    elif choice in presets:
+        base["peso objetivo"] = [float(presets[choice].get(a, 0.0)) for a in base["activo"]]
+    st.caption("Cambia cualquier valor con **doble clic en la celda** (cantidad, precios o peso objetivo). "
+               "Los pesos se escriben como fracción: 0.25 = 25 %.")
+    # La tabla depende del universo y del origen de los pesos: si cambian, se arma de nuevo (no se mezclan filas viejas).
+    edited = st.data_editor(
+        base, key=f"lab_reb_book_{abs(hash((lab.source, tuple(assets), choice, tuple(base['peso objetivo'].round(6)))))}",
+        num_rows="dynamic", hide_index=True,
+        column_config={"peso objetivo": st.column_config.NumberColumn(
+            "peso objetivo", help="Fracción del patrimonio para este activo (0.25 = 25 %). Doble clic para cambiarla.",
+            min_value=0.0, max_value=1.0, step=0.01, format="%.4f"),
+            "cantidad": st.column_config.NumberColumn("cantidad", help="Unidades que tiene hoy la cartera (decisión del equipo).",
+                                                      min_value=0.0)})
+    total_w = float(pd.to_numeric(edited["peso objetivo"], errors="coerce").fillna(0).sum())
+    if total_w > 1 + 1e-6:
+        st.warning(f"Los pesos objetivo suman {total_w:.2%}: deben sumar como máximo 100 % (lo que falte queda en caja).")
+    else:
+        st.caption(f"Suma de pesos objetivo: **{total_w:.2%}**" + (" · el resto queda en caja." if total_w < 1 - 1e-6 else ""))
     c1, c2, c3, c4, c5 = st.columns(5)
     cash = c1.number_input("Caja inicial", value=float(ctrl["caja"]), step=100.0,
                            key=f"lab_reb_cash_{'real' if real else 'ctrl'}",
@@ -1801,10 +1847,10 @@ def render_portfolio_lab() -> None:
         results = _tab_markowitz(lab, rf_ea, gamma, bounds, groups, max_target)
     with tabs[3], st.container(border=True, key="lab_module_3"):
         _module_header(3)
-        _tab_black_litterman(lab, rf_ea, gamma, bounds, groups)
+        bl_res = _tab_black_litterman(lab, rf_ea, gamma, bounds, groups)
     with tabs[4], st.container(border=True, key="lab_module_4"):
         _module_header(4)
-        _tab_rebalance(lab, gamma, bounds, groups)
+        _tab_rebalance(lab, gamma, bounds, groups, _target_presets(lab, results, bl_res))
     with tabs[5], st.container(border=True, key="lab_module_5"):
         _module_header(5)
         _tab_backtest(lab, rf_ea, gamma, bounds, groups)
