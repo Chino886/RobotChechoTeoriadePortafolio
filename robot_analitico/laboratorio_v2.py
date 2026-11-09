@@ -188,9 +188,11 @@ def _from_prices(source, prices, m, label, assets, frequency):
     returns = raw.dropna(how="any")
     if len(returns) < 2:
         raise ValueError("No quedan observaciones comunes suficientes tras la limpieza.")
-    return LabData(source, returns.mean(), covariance_matrix(returns), m, returns, len(raw), label,
-                   frequency=frequency, calendar=calendar_report(sub, frequency), gap_removed=removed,
-                   last_date=sub.index[-1])
+    lab = LabData(source, returns.mean(), covariance_matrix(returns), m, returns, len(raw), label,
+                  frequency=frequency, calendar=calendar_report(sub, frequency), gap_removed=removed,
+                  last_date=sub.index[-1])
+    lab.prices = sub  # precios del universo elegido (para el rebalanceo con los activos reales)
+    return lab
 
 
 # ---------------------------------------------------------------------------
@@ -907,16 +909,39 @@ def _tab_black_litterman(lab: LabData, rf_ea: float, gamma: float, bounds, group
 
 def _tab_rebalance(lab: LabData, gamma: float, bounds, groups=None):
     ctrl = _load_json("rebalanceo_control.json")
-    st.caption("Simulación contable (paper trading): no hay bróker ni órdenes reales. Valores iniciales de "
-               "rebalanceo_control.json (sintético). La política la define el equipo.")
-    assets = list(lab.mu.index) if lab.source == SOURCE_TWO and len(lab.mu) == len(ctrl["assets"]) else ctrl["assets"]
-    base = pd.DataFrame({
-        "activo": assets, "cantidad": ctrl["cantidades"], "precio anterior": ctrl["precios_iniciales"],
-        "precio nuevo": ctrl["precios_nuevos"], "peso objetivo": ctrl["pesos_objetivo"],
-    })
-    edited = st.data_editor(base, key="lab_reb_book", num_rows="dynamic", hide_index=True)
+    prices = getattr(lab, "prices", None)
+    real = lab.source != SOURCE_TWO and prices is not None and len(prices.dropna(how="any")) >= 2
+    if real:
+        # Mercado o sintético: los activos del universo elegido, con sus dos últimos precios reales de la serie.
+        last2 = prices.dropna(how="any").iloc[-2:]
+        assets = list(lab.mu.index)
+        base = pd.DataFrame({
+            "activo": assets, "cantidad": [0.0] * len(assets),
+            "precio anterior": [float(last2.iloc[0][a]) for a in assets],
+            "precio nuevo": [float(last2.iloc[1][a]) for a in assets],
+            "peso objetivo": [1.0 / len(assets)] * len(assets),
+        })
+        currency = lab.currency or ("USD" if lab.source == SOURCE_MARKET else "unidades")
+        st.caption(
+            f"Simulación contable (paper trading): no hay bróker ni órdenes reales. Activos: los {len(assets)} del universo "
+            f"elegido arriba. Precios: los dos últimos de la serie ({last2.index[0].date()} y {last2.index[1].date()}), en "
+            f"{currency}. **Cantidades, caja y pesos objetivo los define el equipo**: el peso objetivo inicial es 1/N solo "
+            "como punto de partida.")
+    else:
+        assets = list(lab.mu.index) if lab.source == SOURCE_TWO and len(lab.mu) == len(ctrl["assets"]) else ctrl["assets"]
+        base = pd.DataFrame({
+            "activo": assets, "cantidad": ctrl["cantidades"], "precio anterior": ctrl["precios_iniciales"],
+            "precio nuevo": ctrl["precios_nuevos"], "peso objetivo": ctrl["pesos_objetivo"],
+        })
+        currency = ctrl["moneda"]
+        st.caption("Simulación contable (paper trading): no hay bróker ni órdenes reales. Valores iniciales de "
+                   "rebalanceo_control.json (sintético). La política la define el equipo.")
+    # La tabla depende del universo: si cambian los activos, se arma de nuevo (no se mezclan filas viejas).
+    edited = st.data_editor(base, key=f"lab_reb_book_{abs(hash((lab.source, tuple(assets))))}", num_rows="dynamic",
+                            hide_index=True)
     c1, c2, c3, c4, c5 = st.columns(5)
-    cash = c1.number_input("Caja inicial", value=float(ctrl["caja"]), step=100.0, key="lab_reb_cash",
+    cash = c1.number_input("Caja inicial", value=float(ctrl["caja"]), step=100.0,
+                           key=f"lab_reb_cash_{'real' if real else 'ctrl'}",
                            help="Efectivo disponible antes de operar.")
     cost = c2.number_input("Costo por nominal negociado", value=float(ctrl["costo_por_nominal"]), min_value=0.0, step=0.0005,
                            format="%.4f", key="lab_reb_cost", help="Comisión como fracción de cada compra o venta (0,001 = 0,1 %).")
@@ -937,12 +962,19 @@ def _tab_rebalance(lab: LabData, gamma: float, bounds, groups=None):
     if (p0 <= 0).any() or (p1 <= 0).any():
         st.error("Los precios deben ser positivos.")
         return
-    book = Book(quantities=q, cash=cash, currency=ctrl["moneda"])
+    if (q.fillna(0) == 0).all() and cash <= 0:
+        st.info("Escribe en la tabla las **cantidades** que tiene la cartera (o una **caja inicial** arriba) para simular "
+                "el rebalanceo. Son decisiones del equipo: el bot no las inventa.")
+        if lab.returns is not None and len(lab.returns) > 60:
+            _policy_simulation(lab, gamma, bounds, groups, float(cost), float(band), float(cash_min))
+        _explain("¿Qué es rebalancear?", AYUDA["rebalanceo"])
+        return
+    book = Book(quantities=q, cash=cash, currency=currency)
     w_before_prices = book.weights(p0)
     w_now = book.weights(p1)
     drift = (w_now - target).abs().max()
     a, b, c = st.columns(3)
-    a.metric("Patrimonio antes", f"{book.equity(p1):,.2f} {ctrl['moneda']}")
+    a.metric("Patrimonio antes", f"{book.equity(p1):,.2f} {currency}")
     b.metric("Deriva máxima vs. objetivo", _pct(drift))
     c.metric("Decisión según banda", "Rebalancear" if drift > band else "Abstenerse")
     _what(GUIA["reb_pesos"])
