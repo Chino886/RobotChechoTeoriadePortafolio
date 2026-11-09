@@ -780,12 +780,20 @@ def render_historical_analysis() -> None:
             st.markdown(_stats_panel_html("Muestra completa", full, frequency), unsafe_allow_html=True)
         with col2:
             st.markdown(_stats_panel_html(label, recent, frequency, partial=is_partial), unsafe_allow_html=True)
-        with st.expander("Ver los valores exactos (todas las cifras decimales)", icon=":material/data_object:"):
-            c1, c2 = st.columns(2)
-            c1.markdown("**Muestra completa**")
-            c1.write(full)
-            c2.markdown(f"**{label}**")
-            c2.write(recent)
+        with st.expander("Ver los valores exactos (todas las cifras decimales)", icon=":material/table:"):
+            # Tabla legible en vez de un diccionario en formato código.
+            def _exact(v):
+                if v is None or (isinstance(v, float) and v != v):  # None o NaN
+                    return "—"
+                return f"{v:,}" if isinstance(v, int) else f"{v:.10f}".rstrip("0").rstrip(".")
+            exact = pd.DataFrame({
+                "Indicador": [_STATS_INFO.get(k, (k,))[0] for k in full],
+                "Muestra completa": [_exact(v) for v in full.values()],
+                label: [_exact(recent[k]) if k in recent else "—" for k in full],
+            })
+            st.dataframe(exact, hide_index=True, use_container_width=True)
+            st.caption("Rendimientos logarítmicos por periodo, salvo las filas «anualizada». Sin redondear, para "
+                       "comparar con el anexo de cálculos o con Excel.")
 
         dd = drawdown_series(prices)
         st.metric("Máxima caída histórica (drawdown)", f"{max_drawdown(prices):.2%}")
