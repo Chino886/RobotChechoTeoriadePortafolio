@@ -633,6 +633,75 @@ def render_disclaimer_gate(user_name: str, user_email: str) -> None:
     st.rerun()
 
 
+# Descriptivos en tarjetas: mismos valores de descriptive_stats(); solo cambia cómo se leen.
+_STATS_INFO = {
+    "n": ("Rendimientos usados", "Cantidad de log-rendimientos de la muestra.", "int"),
+    "media": ("Media por periodo", "Promedio de los log-rendimientos de cada periodo.", "ret"),
+    "mediana": ("Mediana por periodo", "Valor del medio: la mitad de los periodos rindió menos y la otra mitad más.", "ret"),
+    "varianza": ("Varianza", "Dispersión al cuadrado de los log-rendimientos.", "var"),
+    "desv. estándar": ("Desviación estándar", "Cuánto se alejan, en promedio, los rendimientos de su media.", "disp"),
+    "mínimo": ("Peor periodo", "El log-rendimiento más bajo de la muestra.", "ret"),
+    "P25": ("Percentil 25", "El 25% de los periodos rindió menos que esto.", "ret"),
+    "P75": ("Percentil 75", "El 75% de los periodos rindió menos que esto.", "ret"),
+    "máximo": ("Mejor periodo", "El log-rendimiento más alto de la muestra.", "ret"),
+    "asimetría (Fisher)": ("Asimetría", "Mayor que 0: cola derecha más larga (subidas extremas); menor que 0: caídas extremas.", "num"),
+    "exceso de curtosis (Fisher)": ("Exceso de curtosis", "Mayor que 0: más eventos extremos que una normal (colas pesadas).", "num"),
+    "media anualizada": ("Media anualizada", "Media llevada a un año.", "pct"),
+    "volatilidad anualizada": ("Volatilidad anualizada", "Desviación estándar llevada a un año.", "pct"),
+    "percentil (midrank) del último g_t": ("Percentil del último rendimiento", "Dónde queda el último rendimiento frente a toda la muestra (0 a 100).", "pctl"),
+}
+_STATS_GROUPS = [
+    ("Resumen anual", ["media anualizada", "volatilidad anualizada"]),
+    ("Tendencia central", ["n", "media", "mediana"]),
+    ("Dispersión y rango", ["desv. estándar", "varianza", "mínimo", "P25", "P75", "máximo"]),
+    ("Forma de la distribución", ["asimetría (Fisher)", "exceso de curtosis (Fisher)", "percentil (midrank) del último g_t"]),
+]
+
+
+def _stat_value(kind: str, v) -> "tuple[str, str]":
+    """(texto principal, texto secundario). El valor exacto va en la ayuda emergente."""
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return "—", ""
+    if kind == "int":
+        return f"{int(v):,}", ""
+    if kind == "pct":
+        return f"{v:.2%}", f"{v:.6f}"
+    if kind == "ret":
+        return f"{v:.6f}", f"≈ {v:+.3%} por periodo"
+    if kind == "disp":
+        return f"{v:.6f}", f"≈ {v:.3%} por periodo"
+    if kind == "var":
+        return f"{v:.8f}", ""
+    if kind == "pctl":
+        return f"{v:.2f}", "de 100"
+    return f"{v:.4f}", ""
+
+
+def _stats_panel_html(title: str, values: dict, frequency: str, partial: bool = False) -> str:
+    groups = []
+    for gname, keys in _STATS_GROUPS:
+        cells = []
+        for k in keys:
+            if k not in values:
+                continue
+            name, tip, kind = _STATS_INFO[k]
+            main, sub = _stat_value(kind, values[k])
+            v = values[k]
+            tone = ""
+            if kind in ("ret", "pct") and k not in ("desv. estándar", "volatilidad anualizada") and isinstance(v, (int, float)):
+                tone = " pos" if v > 0 else (" neg" if v < 0 else "")
+            cells.append(
+                f'<div class="st-cell{" big" if kind == "pct" else ""}{tone}" title="{html_escape(tip)} · valor exacto: {v}">'
+                f'<span class="sc-n">{html_escape(name)}</span><span class="sc-v">{html_escape(main)}</span>'
+                + (f'<span class="sc-s">{html_escape(sub)}</span>' if sub else "") + "</div>")
+        if cells:
+            groups.append(f'<div class="st-group"><div class="st-gt">{html_escape(gname)}</div>'
+                          f'<div class="st-grid">{"".join(cells)}</div></div>')
+    badge = '<span class="st-badge warn">Parcial</span>' if partial else f'<span class="st-badge">{html_escape(frequency or "Diaria")}</span>'
+    return (f'<section class="dpst-stats"><div class="st-head"><b>{html_escape(title)}</b>{badge}</div>'
+            f'{"".join(groups)}</section>')
+
+
 def render_historical_analysis() -> None:
     """
     Análisis histórico de un activo (RF-09 a RF-12): rendimientos
@@ -693,39 +762,30 @@ def render_historical_analysis() -> None:
         stats = descriptive_stats(returns, periods_per_year)
         recent_stats, is_partial = recent_window_stats(returns, periods_per_year)
 
-        col1, col2 = st.columns(2)
+        full = {
+            "n": stats.n, "media": stats.mean, "mediana": stats.median, "varianza": stats.variance,
+            "desv. estándar": stats.std, "mínimo": stats.minimum, "P25": stats.p25, "P75": stats.p75,
+            "máximo": stats.maximum, "asimetría (Fisher)": stats.skewness,
+            "exceso de curtosis (Fisher)": stats.excess_kurtosis, "media anualizada": stats.mean_annualized,
+            "volatilidad anualizada": stats.std_annualized,
+            "percentil (midrank) del último g_t": stats.last_return_percentile,
+        }
+        recent = {
+            "n": recent_stats.n, "media": recent_stats.mean, "desv. estándar": recent_stats.std,
+            "media anualizada": recent_stats.mean_annualized, "volatilidad anualizada": recent_stats.std_annualized,
+        }
+        label = "Ventana reciente" + (" (PARCIAL, T < m)" if is_partial else "")
+        col1, col2 = st.columns([1.55, 1], gap="medium")
         with col1:
-            st.markdown("**Muestra completa**")
-            st.write(
-                {
-                    "n": stats.n,
-                    "media": stats.mean,
-                    "mediana": stats.median,
-                    "varianza": stats.variance,
-                    "desv. estándar": stats.std,
-                    "mínimo": stats.minimum,
-                    "P25": stats.p25,
-                    "P75": stats.p75,
-                    "máximo": stats.maximum,
-                    "asimetría (Fisher)": stats.skewness,
-                    "exceso de curtosis (Fisher)": stats.excess_kurtosis,
-                    "media anualizada": stats.mean_annualized,
-                    "volatilidad anualizada": stats.std_annualized,
-                    "percentil (midrank) del último g_t": stats.last_return_percentile,
-                }
-            )
+            st.markdown(_stats_panel_html("Muestra completa", full, frequency), unsafe_allow_html=True)
         with col2:
-            label = "Ventana reciente" + (" (PARCIAL, T < m)" if is_partial else "")
-            st.markdown(f"**{label}**")
-            st.write(
-                {
-                    "n": recent_stats.n,
-                    "media": recent_stats.mean,
-                    "desv. estándar": recent_stats.std,
-                    "media anualizada": recent_stats.mean_annualized,
-                    "volatilidad anualizada": recent_stats.std_annualized,
-                }
-            )
+            st.markdown(_stats_panel_html(label, recent, frequency, partial=is_partial), unsafe_allow_html=True)
+        with st.expander("Ver los valores exactos (todas las cifras decimales)", icon=":material/data_object:"):
+            c1, c2 = st.columns(2)
+            c1.markdown("**Muestra completa**")
+            c1.write(full)
+            c2.markdown(f"**{label}**")
+            c2.write(recent)
 
         dd = drawdown_series(prices)
         st.metric("Máxima caída histórica (drawdown)", f"{max_drawdown(prices):.2%}")
