@@ -38,6 +38,8 @@ Para cada uno: **Decisión** · **Justificación** (por qué ese valor y no otro
 
 ### B2. γ (aversión al riesgo) — Laboratorio → Supuestos financieros
 - Qué es: cuánto penaliza el inversionista la varianza en U = μ − (γ/2)σ². No se estima de los precios.
+- En el bot se elige por perfil: **Conservador γ = 10, Moderado γ = 5, Agresivo γ = 2** (mapa decidido por el equipo el
+  2026-11-09), o «Personalizado» para escribir γ. Falta justificar qué perfil corresponde al inversionista del mandato.
 - Banco: P57, P58.
 - Decisión: · Justificación: · Cambiaría si: · Quién/fecha:
 
