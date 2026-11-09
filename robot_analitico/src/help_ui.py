@@ -100,16 +100,17 @@ def _css() -> str:
     show_mod = ",\n".join(f"html[data-dpst-mod='{i}'] .hp-mod[data-mod='{i}']"
                           for i in range(1, len(ha.LAB_MODULE_HELP) + 1))
     return f"""<style>
-/* Pastilla fija, encima del botón «Ir a… Ctrl K» (#dpst-k, abajo a la derecha). */
+/* Pastilla fija, encima del botón «Ir a… Ctrl K» (#dpst-k). Los dos van más arriba que la barra
+   «Manage app» que Streamlit Cloud pone abajo a la derecha. */
 .st-key-{FAB_KEY} {{ position: fixed; z-index: 1000000; right: calc(18px + env(safe-area-inset-right, 0px));
-  bottom: calc(74px + env(safe-area-inset-bottom, 0px)); width: auto !important; }}
-.st-key-{FAB_KEY} [data-testid="stPopover"] button {{ border-radius: 999px; padding: 9px 16px; min-height: 0;
+  bottom: calc(108px + env(safe-area-inset-bottom, 0px)); width: auto !important; }}
+.st-key-{FAB_KEY} [data-testid="stPopover"] button {{ border-radius: 999px; padding: 5px 12px; min-height: 0; font-size: 0.8rem;
   font-weight: 600; color: var(--dp-on-accent); background: var(--dp-accent); border: 1px solid transparent;
   box-shadow: 0 12px 28px rgba(var(--dp-accent-rgb), 0.32); transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s; }}
 .st-key-{FAB_KEY} [data-testid="stPopover"] button:hover {{ transform: translateY(-2px); color: var(--dp-on-accent);
   box-shadow: 0 16px 34px rgba(var(--dp-accent-rgb), 0.42); border-color: transparent; }}
 .st-key-{FAB_KEY} [data-testid="stPopover"] button:focus-visible {{ outline: 2px solid var(--dp-ink); outline-offset: 2px; }}
-.st-key-{FAB_KEY} [data-testid="stPopover"] button p, .st-key-{FAB_KEY} [data-testid="stPopover"] button span {{ color: inherit; }}
+.st-key-{FAB_KEY} [data-testid="stPopover"] button p, .st-key-{FAB_KEY} [data-testid="stPopover"] button span {{ color: inherit; font-size: 0.8rem; }}
 html.dpst-present .st-key-{FAB_KEY} {{ display: none !important; }}
 @media print {{ .st-key-{FAB_KEY} {{ display: none !important; }} }}
 /* Ventana */

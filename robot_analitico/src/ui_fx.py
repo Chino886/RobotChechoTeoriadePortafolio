@@ -1248,16 +1248,16 @@ _FX_JS = r"""
   #dpst-progress{position:fixed;top:0;left:0;height:2px;width:100%;z-index:1000002;pointer-events:none;
     transform-origin:0 50%;transform:scaleX(0);background:linear-gradient(90deg,var(--dp-accent-lo),var(--dp-accent-hi),var(--dp-blue));
     box-shadow:0 0 12px rgba(var(--dp-accent-rgb), .6)}
-  #dpst-k{position:fixed;z-index:1000001;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px));
-    display:flex;align-items:center;gap:10px;padding:10px 14px 10px 12px;border-radius:999px;cursor:pointer;
-    font:500 13px Geist,Inter,system-ui,sans-serif;color:var(--dp-ink);background:rgba(var(--dp-surface-rgb), .78);
+  #dpst-k{position:fixed;z-index:1000001;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(64px + env(safe-area-inset-bottom,0px));
+    display:flex;align-items:center;gap:8px;padding:7px 11px 7px 10px;border-radius:999px;cursor:pointer;
+    font:500 12px Geist,Inter,system-ui,sans-serif;color:var(--dp-ink);background:rgba(var(--dp-surface-rgb), .78);
     border:1px solid rgba(var(--dp-line-rgb), .18);backdrop-filter:blur(16px) saturate(160%);-webkit-backdrop-filter:blur(16px) saturate(160%);
     box-shadow:0 12px 32px rgba(var(--dp-shadow-rgb), calc(.35 * var(--dp-shadow-k)));transition:transform .25s cubic-bezier(.2,.8,.2,1),border-color .25s}
   #dpst-k:hover{transform:translateY(-2px);border-color:rgba(var(--dp-accent-rgb), .5)}
   #dpst-k:active{transform:scale(.96);transition:transform 100ms ease-out}
-  #dpst-k kbd{font:500 11px "Geist Mono",ui-monospace,monospace;padding:3px 7px;border-radius:6px;color:var(--dp-accent-ink);
+  #dpst-k kbd{font:500 10px "Geist Mono",ui-monospace,monospace;padding:2px 6px;border-radius:6px;color:var(--dp-accent-ink);
     background:rgba(var(--dp-accent-rgb), .12);border:1px solid rgba(var(--dp-accent-rgb), .35)}
-  #dpst-k svg{width:16px;height:16px}
+  #dpst-k svg{width:14px;height:14px}
   #dpst-cmd{position:fixed;inset:0;z-index:1000003;display:none;align-items:flex-start;justify-content:center;
     padding:12vh 16px 16px;background:rgba(var(--dp-scrim-rgb), .55);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
   #dpst-cmd.open{display:flex}
