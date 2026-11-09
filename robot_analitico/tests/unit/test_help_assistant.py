@@ -170,3 +170,15 @@ def test_help_button_only_after_consent():
     assert not any("dpst-help" in m.value for m in before.markdown)
     after = _run(True)
     assert any("class='dpst-help'" in m.value and ha.DISCLAIMER in m.value for m in after.markdown)
+
+
+def test_optional_news_quota_is_not_a_help_warning():
+    from src.insights import CTX_KEY
+    from src.status_ui import REASONS, SERVICES, STATE_KEY, STATES
+    _, _, market = _lab()
+    kw = dict(service_names=SERVICES, state_labels=STATES, reasons=REASONS, conn_key=STATE_KEY,
+              ctx_key=CTX_KEY, market_source=market)
+    quota = ha.session_summary({STATE_KEY: {"alpha_vantage": {"status": "limit"}}}, **kw)
+    assert quota["issues"] == []
+    nokey = ha.session_summary({STATE_KEY: {"alpha_vantage": {"status": "nokey"}}}, **kw)
+    assert len(nokey["issues"]) == 1  # sin clave sí se avisa: tiene arreglo

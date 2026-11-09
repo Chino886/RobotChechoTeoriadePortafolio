@@ -152,6 +152,9 @@ FORBIDDEN = ("compre", "venda", "compra ya", "la mejor inversión", "te recomien
              "deberías invertir", "invierte en", "garantiza ganancias")
 
 PROBLEM_STATES = ("offline", "error", "nokey", "limit", "nodata")
+# Fuentes opcionales: si solo se les acabó el cupo gratis del día, la ayuda no lo muestra como aviso
+# (el bot funciona igual con las demás fuentes y el usuario no puede hacer nada). Sigue visible en el Centro de estados.
+OPTIONAL_QUIET = {"alpha_vantage": ("limit",)}
 
 
 def section_by_label(label: str) -> HelpTopic:
@@ -189,7 +192,7 @@ def session_summary(state, *, service_names: dict, state_labels: dict, reasons: 
     issues = []
     for svc, info in (state.get(conn_key) or {}).items():
         status = (info or {}).get("status")
-        if status in PROBLEM_STATES:
+        if status in PROBLEM_STATES and status not in OPTIONAL_QUIET.get(svc, ()):
             issues.append((service_names.get(svc, (svc,))[0], state_labels.get(status, (status,))[0],
                            reasons.get(status, "")))
     return {
