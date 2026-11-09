@@ -5,6 +5,9 @@ Formato basado en *Keep a Changelog*. Versiones: `MAYOR.MENOR.PARCHE`.
 ## [2.0.0] — 2026-11-06 (entrega final)
 
 ### Agregado
+- Botón flotante «¿Necesitas ayuda?» (abajo a la derecha, encima de «Ir a… Ctrl K»): dice en qué sección y módulo
+  estás, qué puedes hacer ahí, el siguiente paso de uso según lo que ya hiciste (y los avisos del Centro de estados),
+  preguntas frecuentes, glosario y acceso al buscador. Sin IA ni servicios externos; se oculta en Modo presentación.
 - Laboratorio de portafolios: riesgo conjunto, estrés, estimadores (muestral, Ledoit-Wolf, EWMA), Markowitz y
   fronteras (con y sin cortos), CML con proxy rotulado, Black-Litterman, rebalanceo simulado, backtest walk-forward,
   beta/CAPM, valoración del caso Alimentos y traza exportable verificada.
