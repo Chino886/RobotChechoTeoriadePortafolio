@@ -1994,11 +1994,12 @@ def _av_topic_label(topics) -> str:
         return ""
 
 
-@st.cache_data(ttl=ALPHA_VANTAGE_CACHE_TTL_SECONDS, show_spinner=False)
 def _fetch_alpha_vantage(tickers: "str | None", topics: "str | None", max_items: int) -> dict:
     """
     Consulta NEWS_SENTIMENT ordenado por relevancia. Devuelve
     {"items": [...], "status": motivo}; nunca lanza excepción.
+    La clave se lee en cada llamada (fuera de la caché): si el equipo la agrega en Secrets,
+    el aviso «falta la clave» desaparece de inmediato en vez de quedar guardado 3 horas.
     """
     try:
         api_key = st.secrets.get("ALPHA_VANTAGE_API_KEY")
@@ -2006,6 +2007,11 @@ def _fetch_alpha_vantage(tickers: "str | None", topics: "str | None", max_items:
         api_key = None
     if not api_key:
         return {"items": [], "status": "sin API key (ALPHA_VANTAGE_API_KEY)"}
+    return _fetch_alpha_vantage_cached(str(api_key).strip(), tickers, topics, max_items)
+
+
+@st.cache_data(ttl=ALPHA_VANTAGE_CACHE_TTL_SECONDS, show_spinner=False)
+def _fetch_alpha_vantage_cached(api_key: str, tickers: "str | None", topics: "str | None", max_items: int) -> dict:
     params = {"function": "NEWS_SENTIMENT", "apikey": api_key, "limit": max_items, "sort": "RELEVANCE"}
     if tickers:
         params["tickers"] = tickers

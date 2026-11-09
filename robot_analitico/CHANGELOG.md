@@ -22,6 +22,8 @@ Formato basado en *Keep a Changelog*. Versiones: `MAYOR.MENOR.PARCHE`.
   límites, ficha del producto, matriz de evolución, anexo con cálculos contrastables), hojas de decisiones del equipo.
 
 ### Cambiado
+- Alpha Vantage: la clave se lee en cada consulta; el aviso «Falta configuración» desaparece apenas se agrega
+  la clave en Secrets, en vez de quedar guardado hasta 3 horas.
 - Los botones flotantes «¿Necesitas ayuda?» e «Ir a… Ctrl K» quedan más pequeños y más arriba, para que no los tape
   la barra «Manage app» de Streamlit Cloud.
 - Interfaz pensada para alguien sin formación financiera: las explicaciones pasan de desplegables a signos de
