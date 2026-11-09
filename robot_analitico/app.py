@@ -2324,12 +2324,29 @@ def main() -> None:
         conn_key=STATUS_KEY, ctx_key=INSIGHTS_CTX_KEY, market_source=SOURCE_MARKET))
 
 
+TICKER_RETRY_SECONDS = 600  # si NASDAQ Trader no responde, se reintenta a los 10 minutos
+
+
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
+def _ticker_directory_full() -> pd.DataFrame:
+    """Directorio completo de NASDAQ Trader. Si falla lanza la excepción, y Streamlit no guarda en caché los fallos."""
+    return fetch_us_tickers()
+
+
 def _ticker_directory() -> "tuple[pd.DataFrame, bool]":
-    """(directorio, True si es el completo de NASDAQ Trader; False si es la lista de respaldo)."""
+    """
+    (directorio, True si es el completo de NASDAQ Trader; False si es la lista de respaldo).
+    Solo se guarda 24 h el directorio completo: si NASDAQ no responde, se usa la lista corta en esta
+    ejecución y se vuelve a intentar en la siguiente (antes la lista corta quedaba fija 24 horas).
+    """
+    import time
+    last_fail = st.session_state.get("tk_dir_failed_at", 0.0)
+    if time.time() - last_fail < TICKER_RETRY_SECONDS:  # falló hace poco: no esperar otra vez en cada clic
+        return fallback_tickers(), False
     try:
-        return fetch_us_tickers(), True
+        return _ticker_directory_full(), True
     except Exception:
+        st.session_state["tk_dir_failed_at"] = time.time()
         return fallback_tickers(), False
 
 

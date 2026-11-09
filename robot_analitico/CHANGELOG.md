@@ -22,6 +22,8 @@ Formato basado en *Keep a Changelog*. Versiones: `MAYOR.MENOR.PARCHE`.
   límites, ficha del producto, matriz de evolución, anexo con cálculos contrastables), hojas de decisiones del equipo.
 
 ### Cambiado
+- Tickers: la búsqueda ignora guiones, tildes y mayúsculas («coca cola» encuentra Coca-Cola) y, si el directorio de
+  NASDAQ Trader falla, se reintenta a los 10 minutos en lugar de dejar la lista corta fija por 24 horas.
 - La ventana de ayuda ya no muestra como aviso el cupo diario agotado de Alpha Vantage (fuente opcional de noticias).
 - Alpha Vantage: la clave se lee en cada consulta; el aviso «Falta configuración» desaparece apenas se agrega
   la clave en Secrets, en vez de quedar guardado hasta 3 horas.

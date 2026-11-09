@@ -81,3 +81,31 @@ def test_simple_interface_tickers_tab_news_home_and_tooltips(monkeypatch):
     # Las explicaciones ya no son desplegables: son líneas con ayuda emergente.
     assert not any(e.label.startswith(("¿Qué significa", "Más información")) for e in at.expander)
     assert sum(1 for c in at.caption if getattr(c, "help", None)) >= 5
+
+
+def test_search_ignores_hyphens_accents_and_case():
+    df = fetch_us_tickers(http=_Http())
+    assert search(df, "coca cola")["ticker"].tolist() == ["KO"]
+    assert search(df, "COCACOLA")["ticker"].tolist() == ["KO"]
+    assert search(df, "berkshire hathaway")["ticker"].tolist() == ["BRK-B"]
+    assert search(df, "brk-b")["ticker"].tolist() == ["BRK-B"]
+    assert search(df, "Ápple")["ticker"].tolist() == ["AAPL"]
+    assert search(df, "zzzz").empty
+
+
+def test_failed_directory_is_not_stuck_for_24_hours(monkeypatch):
+    import app
+    import src.tickers
+
+    app._ticker_directory_full.clear()
+    state = {}
+    monkeypatch.setattr(app.st, "session_state", state)
+    monkeypatch.setattr(app, "fetch_us_tickers", lambda: (_ for _ in ()).throw(OSError("sin red")))
+    df, complete = app._ticker_directory()
+    assert not complete and len(df) == len(src.tickers.FALLBACK)
+    monkeypatch.setattr(app, "fetch_us_tickers", lambda: fetch_us_tickers(http=_Http()))
+    assert app._ticker_directory()[1] is False  # dentro de los 10 minutos no vuelve a esperar
+    state["tk_dir_failed_at"] -= app.TICKER_RETRY_SECONDS + 1
+    df, complete = app._ticker_directory()
+    assert complete and "KO" in set(df["ticker"])  # pasado el plazo, reintenta y ya trae el directorio completo
+    app._ticker_directory_full.clear()
