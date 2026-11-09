@@ -80,3 +80,21 @@ def test_risk_profile_sets_gamma_and_personal_portfolio():
 
     at.selectbox(key="lab_risk_profile").set_value("Personalizado").run()
     assert not at.exception and any(n.key == "lab_gamma" for n in at.number_input)
+
+
+def test_valuation_uses_the_kd_typed_by_the_user():
+    """M8: el Kd de la casilla debe llegar a la proyección (intereses, FCFE) y no solo al WACC mostrado."""
+    at = _app()
+
+    def interest_and_debt():
+        for d in at.dataframe:
+            v = getattr(d.value, "data", d.value)  # Styler → DataFrame
+            if "intereses" in map(str, getattr(v, "columns", [])):
+                return float(v.loc[1, "intereses"])
+        raise AssertionError("no está la tabla de proyección")
+
+    base_interest = interest_and_debt()
+    at.number_input(key="lab_val_kd").set_value(0.20).run()
+    assert not at.exception
+    interest = interest_and_debt()
+    assert abs(interest / base_interest - 0.20 / 0.135) < 1e-9  # intereses = Kd × deuda al inicio del año
