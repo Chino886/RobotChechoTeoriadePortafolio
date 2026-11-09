@@ -2550,12 +2550,22 @@ def _insights_inputs():
         result, prices, freq, stats, dd = a
         asset = {"ticker": result.ticker, "freq": freq or "Diaria", "n": stats.n, "mean": stats.mean_annualized,
                  "vol": stats.std_annualized, "dd": dd, "start": str(prices.index.min().date()),
-                 "end": str(prices.index.max().date())}
+                 "end": str(prices.index.max().date()), "mean_pp": stats.mean, "median": stats.median,
+                 "std": stats.std, "min": stats.minimum, "max": stats.maximum, "skew": stats.skewness,
+                 "kurt": stats.excess_kurtosis, "pctl_last": stats.last_return_percentile}
+        try:  # la misma ventana reciente de Descriptivos (misma función, mismos datos)
+            recent, partial = recent_window_stats(log_returns(prices),
+                                                  FREQUENCY_PERIODS_PER_YEAR.get(freq, 252))
+            asset.update(recent_vol=recent.std_annualized, recent_mean=recent.mean_annualized, n_recent=recent.n,
+                         partial=partial)
+        except Exception:  # noqa: BLE001 — sin ventana reciente, el análisis usa solo la muestra completa
+            pass
     comparison = None
     cmp_ = st.session_state.get("comparison_result")
     if cmp_ is not None and getattr(cmp_, "ok", False) and cmp_.summaries:
-        comparison = {"rows": [{"ticker": s.ticker, "mean": s.mean_annual, "vol": s.vol_annual, "rvr": s.rvr}
-                               for s in cmp_.summaries],
+        comparison = {"rows": [{"ticker": s.ticker, "mean": s.mean_annual, "vol": s.vol_annual, "rvr": s.rvr,
+                                "dd": s.max_dd, "q05": s.q05, "q95": s.q95, "n": s.n} for s in cmp_.summaries],
+                      "nd": set(non_dominated_tickers(cmp_.summaries)),
                       "window": f"{cmp_.common_start.date()} a {cmp_.common_end.date()}",
                       "currency": cmp_.base_currency or ""}
     return asset, comparison, st.session_state.get(INSIGHTS_CTX_KEY) or {}
@@ -2569,7 +2579,9 @@ def _ask_insight(question: str) -> None:
     opts = context_options(asset, comparison, ctx)
     chosen = st.session_state.get("insights_sel")
     selected = next((o for o in opts if o[1] == chosen), None)
-    ans = insight_answer(question, asset, comparison, ctx, selected)
+    history = st.session_state.get(INSIGHTS_HISTORY_KEY) or []
+    previous = history[-1]["a"].get("topic") if history else None
+    ans = insight_answer(question, asset, comparison, ctx, selected, previous_topic=previous)
     st.session_state.setdefault(INSIGHTS_HISTORY_KEY, []).append({
         "q": question, "sel": selected[1] if selected else None, "a": asdict(ans),
         "ts": pd.Timestamp.now(tz="UTC").strftime("%H:%M UTC")})
@@ -2632,6 +2644,12 @@ def render_insights_page() -> None:
                     with st.chat_message("assistant", avatar=":material/smart_toy:"):
                         st.markdown(insight_answer_html(item["a"], icon), unsafe_allow_html=True)
                         st.caption(item["ts"])
+                        if item is history[-1] and item["a"].get("followups"):
+                            st.caption("Para profundizar:")
+                            cols = st.columns(len(item["a"]["followups"]))
+                            for j, (col, fq) in enumerate(zip(cols, item["a"]["followups"])):
+                                col.button(fq, key=f"ins_fu_{len(history)}_{j}", on_click=_ask_insight, args=(fq,),
+                                           use_container_width=True)
             prompt = st.chat_input("Escribe tu pregunta (ej.: ¿qué significa esta volatilidad y cómo la interpreto?)",
                                    key="ins_input")
             if prompt:

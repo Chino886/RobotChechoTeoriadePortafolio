@@ -469,6 +469,8 @@ def _tab_risk(lab: LabData):
         "vol": float(stats.volatility * np.sqrt(m)), "mean": float(stats.mean * m),
         "wavg_vol": float(weighted_average_volatility(w, lab.sigma) * np.sqrt(m)),
         "corr_min": float(off.min()) if len(off) else None, "corr_max": float(off.max()) if len(off) else None,
+        "pair_max": " y ".join(map(str, off.idxmax())) if len(off) else None,
+        "pair_min": " y ".join(map(str, off.idxmin())) if len(off) else None,
         "weights": {a: float(w[a]) for a in w.index}})
     a, b, c = st.columns(3)
     a.metric("Rendimiento esperado (anual)", _pct(stats.mean * m))
