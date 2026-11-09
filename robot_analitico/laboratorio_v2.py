@@ -1356,6 +1356,9 @@ def _tab_capm(lab: LabData, results=None, rf_ea: float = 0.0):
     c1, c2, c3 = st.columns(3)
     kd = c1.number_input("Kd efectiva anual", value=float(params["kd_EA"]), step=0.005, format="%.4f", key="lab_val_kd",
                          help="Del caso: 13,5 %. El equipo debe confirmar que está en COP, igual que los flujos.")
+    # El Kd escrito debe llegar a project() (intereses, utilidad neta, FCFE) y a la iteración D/E, no solo al WACC.
+    # Copia nueva para no modificar el diccionario cargado del caso.
+    params = {**params, "kd_EA": kd}
     de = c2.number_input("D/E para los pesos del WACC", value=float(params["de_empresa"]), step=0.05, key="lab_val_de", help=CASILLAS["lab_val_de"])
     g = c3.number_input("g terminal (nominal COP)", value=float(params["g_terminal"]), step=0.005, format="%.4f", key="lab_val_g", help=CASILLAS["lab_val_g"])
 
@@ -1395,7 +1398,7 @@ def _tab_capm(lab: LabData, results=None, rf_ea: float = 0.0):
     for note in proj.notes:
         st.error(note)
 
-    kd_eff = kd + kd_shift
+    kd_eff = proj.kd  # = Kd escrito + cambio de Kd del escenario: el mismo que usó la proyección
     w = wacc(ke_cop, kd_eff, params["tax_supuesto"], de)
     c1, c2, c3 = st.columns(3)
     c1.metric("WACC (COP)", _pct(w), help="E/(D+E)·Ke_COP + D/(D+E)·Kd·(1−t)")
