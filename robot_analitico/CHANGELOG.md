@@ -22,6 +22,8 @@ Formato basado en *Keep a Changelog*. Versiones: `MAYOR.MENOR.PARCHE`.
   límites, ficha del producto, matriz de evolución, anexo con cálculos contrastables), hojas de decisiones del equipo.
 
 ### Cambiado
+- Los botones flotantes «¿Necesitas ayuda?» e «Ir a… Ctrl K» quedan más pequeños y más arriba, para que no los tape
+  la barra «Manage app» de Streamlit Cloud.
 - Interfaz pensada para alguien sin formación financiera: las explicaciones pasan de desplegables a signos de
   interrogación (?) con texto muy sencillo (`ayuda.py`); Inicio con guía de 5 pasos; pestaña **Tickers** con el
   directorio de empresas y fondos de EE. UU. (NASDAQ Trader) y botón para usar el ticker en Preselección.
